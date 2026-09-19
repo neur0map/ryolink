@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.9.2
+
+- test: notes leak check must compare full header lines
+
+
 ## v0.9.1
 
 - ci: name the release asset ryolink-linux-amd64
