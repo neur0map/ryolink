@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.9.1
+
+- ci: name the release asset ryolink-linux-amd64
+
+
 ## v0.9
 
 - store logos are block-letter wordmarks — one word in the config renders as five rows of art
