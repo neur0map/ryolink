@@ -95,7 +95,9 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Build the release binary
-        run: CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o ryolink ./cmd/ryolink
+        run: |
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o ryolink ./cmd/ryolink
+          cp ryolink ryolink-linux-amd64
 
       - name: Notes from the binary (same parser the TUI uses)
         run: ./ryolink version --notes > notes.md && head -5 notes.md
@@ -110,4 +112,4 @@ jobs:
           gh release create "v$V" \
             --title "ryolink v$V" \
             --notes-file notes.md \
-            ./ryolink#ryolink-linux-amd64
+            ryolink-linux-amd64
