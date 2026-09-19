@@ -43,8 +43,12 @@ func TestNotesIsTopSection(t *testing.T) {
 	if !strings.HasPrefix(n, "## v"+Version) {
 		t.Fatalf("notes start with %q, want the v%s header", n[:20], Version)
 	}
-	if strings.Contains(n, "## v"+Changelog[1].Version) {
-		t.Fatal("notes leaked a second version's section")
+	// no other version header may appear on any line of the notes
+	for _, line := range strings.Split(n, "\n") {
+		if strings.HasPrefix(line, "## v") && line != "## v"+Version &&
+			!strings.HasPrefix(line, "## v"+Version+" ") {
+			t.Fatalf("notes leaked a second version header: %q", line)
+		}
 	}
 	// every bullet of the top entry must be present
 	for _, c := range Changelog[0].Changes {
