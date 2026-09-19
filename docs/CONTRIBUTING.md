@@ -3,8 +3,8 @@
 ## Local testing
 
 ```bash
-# Terminal 1 — server
-go run ./cmd/tavrn-admin
+# Terminal 1 — server (data lands in the config's data_dir)
+go run ./cmd/ryolink up
 
 # Terminal 2 — connect via SSH
 ssh localhost -p 2222
@@ -31,15 +31,17 @@ feature/* ──PR──> dev ──merge──> main (deploy)
 
 ```
 cmd/
-  tavrn-admin/     Server binary (SSH server, jukebox engine)
+  ryolink/           Single binary: SSH server + admin CLI + service manager
 internal/
   chat/            Message parsing and storage types
+  shop/            Ryoku store front: catalog, HTTP downloads, landing page
   hub/             Connection management, broadcasting
   identity/        Nickname generation, flair, color assignment
   jukebox/         Track catalog, engine, streamer (web audio)
   ratelimit/       Chat rate limiting
   room/            Room definitions
   sanitize/        Input sanitization
+  guard/           Application-layer firewall (conn budgets, bans)
   server/          Wish SSH server setup
   session/         Session state, message types
   store/           SQLite persistence
@@ -60,49 +62,66 @@ ui/
 
 ## Architecture
 
-**Server** — Wish-based SSH server. Each connection gets a Bubble Tea TUI. A shared hub broadcasts messages between sessions. The jukebox engine manages track playback state for web streaming.
+**Server** — Wish-based SSH server. Each connection gets a Bubble Tea TUI
+(cursor-first: clicks drive rooms and store items, keys work beside them).
+A shared hub broadcasts messages between sessions. The jukebox engine
+manages track playback state for web streaming.
 
-**Web audio** — When started with `--web-audio`, the server runs an HTTP endpoint on `:8090` serving `/stream` (continuous MP3) and `/now-playing` (JSON metadata). Caddy reverse-proxies these to the public domain.
+**Store** — `internal/shop` reads `store:` from the config, resolves each
+item against the data dir (size + sha256 + resume streaming) or a mirror
+URL (302 redirect), and serves it all on the shared web mux with the
+landing page. The `#store` room is usually the landing room; the bartender
+works the first *chat* room (`cfg.BarRoom()`), not the landing room.
 
-## Admin commands
+**Web audio** — When `server.web_audio` is true, the server runs an HTTP endpoint (default `127.0.0.1:8090`) serving `/stream` (continuous MP3) and `/now-playing` (JSON metadata). Caddy reverse-proxies these to the public domain; the port itself never faces the internet.
 
-All commands are run via the server binary (`tavrn-admin` or `go run ./cmd/tavrn-admin`):
+## Setup and admin commands
+
+One binary, two roles: `ryolink up` is the server; every other verb is the
+admin CLI talking to the data dir the server watches (live, no restart):
 
 ```bash
-# Server
-tavrn-admin                              # Start the SSH server
-tavrn-admin --web-audio                  # Start with web audio streaming on :8090
-tavrn-admin --update                     # Pull main, rebuild, restart service
+# Setup / service
+ryolink init                                   # write ~/.config/ryolink/ryolink.yaml (store-first)
+ryolink up                                     # run the server (foreground)
+sudo ryolink service install                   # hardened systemd unit, from your YAML
+ryolink status                                 # config, liveness, network bans
 
 # Announcements
-tavrn-admin --message "text"             # Send banner to all connected users
-tavrn-admin --clear-banner               # Clear the active banner
+ryolink --message "text"                       # Banner to all connected users
+ryolink --clear-banner                         # Clear the active banner
 
-# Rooms (live, no restart needed)
-tavrn-admin --add-room "name"            # Add a new room
-tavrn-admin --rename-room "old" "new"    # Rename a room
-tavrn-admin --remove-room "name"         # Remove a room (moves users to landing room)
+# Rooms (live)
+ryolink --add-room "name"                      # Add a new room
+ryolink --rename-room "old" "new"              # Rename a room
+ryolink --remove-room "name"                   # Remove a room (moves users to landing room)
 
 # Moderation
-tavrn-admin --ban "nickname"             # Ban a user by nickname (kicks them)
-tavrn-admin --unban "nickname"           # Unban a user
-tavrn-admin --ban-list                   # Show all active bans
+ryolink --ban "nickname"                       # Ban a user by key fingerprint (kicks them)
+ryolink --unban "nickname"                     # Unban a user
+ryolink --ban-list                             # Show user bans
+ryolink --deny <cidr> [reason]                 # Ban a network (live, persisted across restarts)
+ryolink --undeny <cidr>                        # Lift a network ban
+ryolink --deny-list                            # Show network bans + expiries
 
 # Bartender
-tavrn-admin --bartender-off              # Disable bartender (live)
-tavrn-admin --bartender-on               # Enable bartender (live)
+ryolink --bartender-off                        # Disable bartender (live)
+ryolink --bartender-on                         # Enable bartender (live)
 
 # Reddit feed
-tavrn-admin --feed-add sub [sub...]      # Add subreddit(s) to feed
-tavrn-admin --feed-remove sub            # Remove a subreddit from feed
-tavrn-admin --feed-list                  # List configured subreddits
+ryolink --feed-add sub [sub...]                # Add subreddit(s) to feed
+ryolink --feed-remove sub                      # Remove a subreddit from feed
+ryolink --feed-list                            # List configured subreddits
 
 # Wargame CTF
-tavrn-admin --set-flag bandit 1 "flag"   # Set a wargame flag
-tavrn-admin --list-flags bandit          # List levels with flags
+ryolink --set-flag bandit 1 "flag"             # Set a wargame flag
+ryolink --list-flags bandit                    # List levels with flags
 
 # Data
-tavrn-admin purge                        # Purge all data (preserves bans and owners)
+ryolink purge                                  # Purge all data (bans/owners/drink counts survive)
+
+# Dev deploy (git checkout only)
+ryolink --update                               # Pull main, rebuild, swap binary, restart service
 ```
 
 ## Tests

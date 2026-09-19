@@ -9,6 +9,39 @@ type Entry struct {
 // Changelog lists versions newest-first.
 var Changelog = []Entry{
 	{
+		Version: "0.8",
+		Changes: []string{
+			"command palette — ctrl+p lists every action, fuzzy filter, enter runs it",
+			"keybinds reorganized: ctrl+r opens rooms, ctrl+m toggles cursor mode",
+			"storefront is a bento grid — ASCII distro logos, curl + browser lines on each card",
+			"splash rebuilt: bigger wordmark, rigid alignment",
+			"SSH lockdown proven live — exec/sftp/scp/forwarding refused, banner SSH-2.0-ryolink",
+			"SECURITY.md + DEVELOPMENT.md — what's protected, what isn't, what will bite you",
+		},
+	},
+	{
+		Version: "0.7",
+		Changes: []string{
+			"the ryoku store front — #store is the landing room, catalog in ryolink.yaml",
+			"web surface: landing page, /api/items, resumable downloads with sha256, mirror redirects, download counts",
+			"ryoku visual language — installer palette, RYOKU wordmark with the boot shimmer animation",
+			"cursor-first input — click rooms/items, ctrl+m toggles, keys keep working",
+			"the bartender is Mika now — @mika",
+			"charm libraries bumped to the current crush pins",
+		},
+	},
+	{
+		Version: "0.6",
+		Changes: []string{
+			"single self-contained binary — assets embedded, one file to deploy",
+			"ryolink init / up / status / service install — YAML-driven setup",
+			"built-in abuse firewall — per-IP budgets, auth-fail + scanner bans, persistent deny list",
+			"ryolink --deny / --undeny / --deny-list — live network bans",
+			"data_dir — one directory holds everything the instance touches",
+			"hardened systemd unit generated from your config",
+		},
+	},
+	{
 		Version: "0.5",
 		Changes: []string{
 			"reddit feed — browse posts, read comments in-terminal",
@@ -69,7 +102,7 @@ var Changelog = []Entry{
 	{
 		Version: "0.1",
 		Changes: []string{
-			"SSH tavern with 4 rooms",
+			"SSH ryolink with 4 rooms",
 			"gallery — sticky notes you can drag around",
 			"co-op sudoku in #games",
 			"animated splash with floating sparks",

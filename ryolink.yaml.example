@@ -1,0 +1,132 @@
+# ─────────────────────────────────────────────────
+# Ryolink Configuration — the ryoku store, and a room
+# ─────────────────────────────────────────────────
+# Quick start: `ryolink init` writes this file for you (into
+# ~/.config/ryolink/), auto-detecting your owner fingerprint.
+# The "ryolink" name is reserved — see TRADEMARK.md.
+# ─────────────────────────────────────────────────
+
+ryolink:
+  name: "ryolink"             # Displayed in topbar, splash screen, window title
+  domain: "ryoku.dev"         # Shown in SSH instructions and website
+  tagline: ""                 # Optional — shown on splash below the name
+
+owner:
+  name: "yourname"            # Your nickname (reserved, shown with a star)
+  fingerprint: "SHA256:..."   # Your SSH public key fingerprint
+                              # Find it: ssh-keygen -lf ~/.ssh/id_ed25519.pub
+
+server:
+  host: "0.0.0.0"
+  port: 2222                  # Production: 22 (ryolink.service grants the cap)
+  data_dir: ""                # Default: the directory holding this file.
+                              # Everything mutable (db, host key, logs, admin
+                              # signals, staged store files) lives here.
+  idle_timeout: "2h"          # Drop sessions with no input for this long
+  log_file: ""                # "" = stderr (use journald in service mode)
+  web_audio: false            # 24/7 radio stream endpoint (same web port)
+  web_bind: "127.0.0.1"       # The web surface stays loopback; publish via Caddy
+  web_port: 8090
+
+# The abuse firewall. The server accepts ANY SSH key — the key IS the identity —
+# so what a real sshd would police is handled here, in-process:
+#   - concurrent connection budget (global and per-IP)
+#   - per-IP new-connection rate limit
+#   - ban after N failed handshakes/min (temporary, persisted across restarts)
+#   - ban for port-scanner probes (short keyless connections, no handshake)
+security:
+  max_conns: 512              # Total in-flight TCP connections
+  max_conns_per_ip: 4         # One household, four tabs is generous
+  new_conns_per_min: 30       # Per-IP connection rate
+  max_auth_fails: 10          # Failed handshakes per minute before a ban
+  ban_minutes: 30             # Auth-failure network ban length
+  probe_ban_minutes: 60       # Scanner-probe ban length
+  deny_cidrs: []              # Always blocked, e.g. ["203.0.113.0/24"]
+  allow_cidrs: []             # When non-empty, ONLY these ranges connect
+
+# Input mode. ryolink is cursor-first: clicks activate rooms and items,
+# keyboard shortcuts keep working beside them. ctrl+m toggles live.
+bind:
+  mouse: "auto"               # auto|on = clicks active, off = keyboard only
+
+# ── The store ────────────────────────────────────
+# ryolink's front page: the Ryoku ISO, the panic-button recovery script,
+# rescue files. The TUI #store room browses this; the web landing page
+# (same port as web_audio) serves it. Items with a local `path` stream
+# from this box (Range-safe, resumable); items with a `url` redirect to
+# your mirror — keep multi-gigabyte ISOs on a CDN, not on the chat box.
+#
+# Stage files into the data dir (e.g. data/store/ryoku.iso) and they appear
+# with size + sha256 automatically. No restart needed: the catalog re-checks
+# disk when the storefront is opened.
+store:
+  enabled: true
+  title: "Ryoku Store"
+  public_url: ""              # e.g. https://dl.ryoku.dev — default: this host
+  items:
+    - id: "ryoku-iso"
+      name: "Ryoku Linux"
+      kind: iso
+      version: "0.59"
+      desc: "The live image. Arch underneath, Hyprland + Quickshell on top."
+      url: "https://github.com/ryoku-dev/ryoku-arch/releases/latest"   # mirror
+      logo: |2
+                          -`
+                         .o+`
+                        `ooo/
+                       `+oooo:
+                      `+oooooo:
+                      -+oooooo+:
+    - id: "ryoku-cachyos-iso"
+      name: "Ryoku CachyOS"
+      kind: iso
+      version: "0.59"
+      desc: "Same desktop, CachyOS base: x86-64-v3 tuning + BORE scheduler."
+      url: "https://github.com/ryoku-dev/ryoku-arch/releases/latest"
+      logo: |2
+         .-------------------------:
+        .+=========================.
+        :++===++==================-
+        :*++====+++++=============-
+        -*+++=====+***++==========:
+        =*++++========------------:
+    - id: "recovery"
+      name: "ryoku-recovery"
+      kind: script
+      desc: "The panic button: rebuilds the desktop from origin when an update bites."
+      path: "store/ryoku-recovery.sh"
+      logo: "力"
+    - id: "shell-installer"
+      name: "ryoku-shell-install"
+      kind: script
+      desc: "Convert an existing Arch box to the Ryoku desktop, one script."
+      path: "store/ryoku-shell-install.sh"
+      logo: "力"
+
+# Optional API keys. Environment variables (same names as the comments) win,
+# so secrets can live in EnvironmentFile= instead of here.
+api:
+  openai_key: ""              # bartender (OPENAI_API_KEY)
+  klipy_key: ""               # /gif search (KLIPY_API_KEY)
+  exa_key: ""                 # bartender web search (EXA_API_KEY)
+  reddit_client_id: ""        # reddit feed OAuth (REDDIT_CLIENT_ID)
+  reddit_secret: ""           # (REDDIT_CLIENT_SECRET)
+
+rooms:
+  # First room = landing = the store front. Chat rooms are secondary.
+  - name: "store"
+    type: store               # the ryoku storefront (requires store.enabled)
+  - name: "lounge"
+    type: chat                # the bar — Mika works the lounge
+  - name: "gallery"
+    type: gallery             # sticky-note canvas
+  - name: "games"
+    type: games               # sudoku and other games
+  - name: "suggestions"
+    type: chat
+
+  # Wargame CTF rooms (optional — for OverTheWire challenges)
+  # - name: "bandit"
+  #   type: wargame
+  # - name: "natas"
+  #   type: wargame

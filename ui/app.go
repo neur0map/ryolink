@@ -12,19 +12,19 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/harmonica"
-	"tavrn.sh/internal/chat"
-	"tavrn.sh/internal/dm"
-	"tavrn.sh/internal/gif"
-	"tavrn.sh/internal/hub"
-	"tavrn.sh/internal/identity"
-	"tavrn.sh/internal/mention"
-	"tavrn.sh/internal/poll"
-	"tavrn.sh/internal/reddit"
-	"tavrn.sh/internal/sanitize"
-	"tavrn.sh/internal/session"
-	"tavrn.sh/internal/store"
-	"tavrn.sh/internal/sudoku"
-	"tavrn.sh/internal/wargame"
+	"ryolink/internal/chat"
+	"ryolink/internal/dm"
+	"ryolink/internal/gif"
+	"ryolink/internal/hub"
+	"ryolink/internal/identity"
+	"ryolink/internal/mention"
+	"ryolink/internal/poll"
+	"ryolink/internal/reddit"
+	"ryolink/internal/sanitize"
+	"ryolink/internal/session"
+	"ryolink/internal/store"
+	"ryolink/internal/sudoku"
+	"ryolink/internal/wargame"
 )
 
 type HubMsg session.Msg
@@ -45,7 +45,7 @@ type appState int
 const (
 	stateSplash appState = iota
 	stateTransition
-	stateTavern
+	stateRyolink
 )
 
 const (
@@ -97,6 +97,7 @@ type App struct {
 	pollVoteOverlay PollVoteOverlay
 	changelogModal  ChangelogModal
 	gifModal        GifModal
+	paletteModal    PaletteModal
 
 	// Polls
 	pollStore *poll.Store
@@ -120,7 +121,7 @@ type App struct {
 
 	// Direct messages
 	dmStore       *dm.Store
-	dmMode        bool // true = DM screen, false = tavern
+	dmMode        bool // true = DM screen, false = ryolink
 	dmInbox       DMInbox
 	dmChatView    ChatView
 	dmInConvo     bool   // true = viewing a conversation, false = inbox
@@ -146,9 +147,15 @@ type App struct {
 	transPos    float64 // 0.0 = fully hidden, 1.0 = fully revealed
 	transVel    float64
 
+	// Storefront (type "store" rooms) + input mode
+	shop       func() (string, []StoreItemView) // live catalog snapshot (nil = no shop)
+	storefront *Storefront
+	mouseOn    bool // cursor-first; ctrl+m toggles, keys always work
+
 	// Config-driven branding
-	tavernName       string
-	tavernDomain     string
+	roomOrder        []string
+	ryolinkName      string
+	ryolinkDomain    string
 	tagline          string
 	ownerName        string
 	ownerFingerprint string
@@ -156,10 +163,47 @@ type App struct {
 	roomTypes        map[string]string
 }
 
-// roomByType returns the name of the first room with the given type.
+// roomAtScreenY maps an absolute screen click inside the rooms rail to a
+// room name, mirroring RoomsPanel.View's line layout: top bar is 3 lines,
+// the panel has 1 line of top padding, then ROOMS + rule, one line per
+// regular room, and (when present) blank + rule + WARGAMES + one line each.
+// Returns "" when the rail is hidden or the click misses a room row.
+func (a App) roomAtScreenY(y int) string {
+	if a.rooms.Width <= 0 {
+		return ""
+	}
+	regular := make([]string, 0, len(a.cachedRoomInfos))
+	war := make([]string, 0)
+	for _, rm := range a.cachedRoomInfos {
+		if a.roomTypes[rm.Name] == "wargame" {
+			war = append(war, rm.Name)
+		} else {
+			regular = append(regular, rm.Name)
+		}
+	}
+	row := y - 3 - 1 - 2 // topBar(3) + paddingTop(1) + header + rule
+	if row >= 0 && row < len(regular) {
+		return regular[row]
+	}
+	if len(war) > 0 {
+		row -= len(regular) + 3 // blank + rule + WARGAMES header
+		if row >= 0 && row < len(war) {
+			return war[row]
+		}
+	}
+	return ""
+}
+
+// roomByType returns the first room (created order, matching the sidebar)
+// with the given type.
 func (a App) roomByType(roomType string) string {
-	for name, rt := range a.roomTypes {
-		if rt == roomType {
+	for _, rm := range a.cachedRoomInfos {
+		if a.roomTypes[rm.Name] == roomType {
+			return rm.Name
+		}
+	}
+	for _, name := range a.roomOrder {
+		if a.roomTypes[name] == roomType {
 			return name
 		}
 	}
@@ -179,15 +223,15 @@ func (a App) wargameRoomNames() []string {
 
 func NewApp(sess *session.Session, st *store.Store, h *hub.Hub, onSend func(session.Msg),
 	game *sudoku.Game, ps *poll.Store,
-	tavernName, tavernDomain, tagline, ownerName, ownerFingerprint, firstRoom string,
+	ryolinkName, ryolinkDomain, tagline, ownerName, ownerFingerprint, firstRoom string,
 	roomTypes map[string]string, gifClient *gif.KlipyClient, ws *wargame.Store,
-	ds *dm.Store, rc *reddit.Client) App {
+	ds *dm.Store, rc *reddit.Client, shopItems func() (string, []StoreItemView), mouseOn bool, roomOrder []string) App {
 	app := App{
 		state:            stateSplash,
-		splash:           NewSplash(sess.Nickname, sess.Fingerprint, sess.Flair, tavernDomain, tagline),
+		splash:           NewSplash(sess.Nickname, sess.Fingerprint, sess.Flair, ryolinkDomain, tagline),
 		session:          sess,
 		chat:             NewChatView(),
-		topBar:           TopBar{TavernName: tavernName, Room: firstRoom},
+		topBar:           TopBar{RyolinkName: ryolinkName, Room: firstRoom},
 		bottomBar:        NewBottomBar(),
 		rooms:            NewRoomsPanel(),
 		online:           NewOnlinePanel(),
@@ -200,17 +244,20 @@ func NewApp(sess *session.Session, st *store.Store, h *hub.Hub, onSend func(sess
 		modal:            ModalNone,
 		sudokuGame:       game,
 		pollStore:        ps,
-		tavernName:       tavernName,
-		tavernDomain:     tavernDomain,
+		ryolinkName:      ryolinkName,
+		ryolinkDomain:    ryolinkDomain,
 		tagline:          tagline,
 		ownerName:        ownerName,
 		ownerFingerprint: ownerFingerprint,
 		firstRoom:        firstRoom,
 		roomTypes:        roomTypes,
+		roomOrder:        roomOrder,
 		gifClient:        gifClient,
 		wargameStore:     ws,
 		seenWargameRooms: make(map[string]bool),
 		dmStore:          ds,
+		shop:             shopItems,
+		mouseOn:          mouseOn,
 	}
 	app.chat.SetOwnNickname(sess.Nickname)
 	app.chat.OwnerName = ownerName
@@ -242,7 +289,18 @@ func (a App) Init() tea.Cmd {
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if click, ok := msg.(tea.MouseClickMsg); ok && a.mouseOn && a.modal == ModalNone &&
+		a.state == stateRyolink && click.X < a.rooms.Width {
+		if room := a.roomAtScreenY(click.Y); room != "" && room != a.session.Room {
+			a.switchRoom(room)
+			return a, nil
+		}
+	}
 	switch msg := msg.(type) {
+	case StoreCopyMsg:
+		// The storefront asked to put a download URL on the user's clipboard
+		// (OSC 52 rides the SSH channel; no client config needed).
+		return a, tea.SetClipboard(msg.URL)
 	case feedCommentsMsg:
 		a.feed.SetComments(msg.comments, msg.post)
 		return a, nil
@@ -271,7 +329,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.hub.OnlineCount() > 0 {
 			a.online.Frame++
 		}
-		if a.state == stateTavern {
+		if a.state == stateRyolink {
 			a.refreshCaches()
 			a.chat.Tick()
 			if !a.chat.IsScrolling() && TickGifAnimations(a.chat.messages) {
@@ -310,7 +368,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Snap to done when close enough
 			if math.Abs(a.transPos-1.0) < 0.01 {
 				a.transPos = 1.0
-				a.state = stateTavern
+				a.state = stateRyolink
 			}
 		}
 		return a, doTick(a.nextTickInterval())
@@ -328,6 +386,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CloseModalMsg:
 		a.modal = ModalNone
 		return a, nil
+
+	case PaletteRunMsg:
+		a.modal = ModalNone
+		return a.runPaletteCommand(msg.ID)
 
 	case NickChangeMsg:
 		return a.applyNickChange(msg.Nick)
@@ -461,7 +523,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.chat.AddMessage(chat.NewSystemMessage(a.session.Room, "Wrong flag. Try again."))
 			return a, nil
 		}
-		// Success — announce to the entire tavern
+		// Success — announce to the entire ryolink
 		totalLevel := a.wargameStore.UserTotalLevel(a.session.Fingerprint)
 		totalPts := a.wargameStore.UserTotalPoints(a.session.Fingerprint)
 		announcement := fmt.Sprintf(">> %s hacked %s level %d  [Lv.%d | %d pts]",
@@ -524,6 +586,21 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Splash state — handle keys directly (tick/resize handled above)
 	if a.state == stateSplash {
+		if _, ok := msg.(tea.MouseClickMsg); ok && a.mouseOn && a.modal == ModalNone {
+			// cursor-first: a click anywhere enters, same as Enter
+			a.state = stateTransition
+			a.transSpring = harmonica.NewSpring(harmonica.FPS(30), 6.0, 0.8)
+			a.transPos = 0.0
+			a.transVel = 0.0
+			a.doLayout()
+			a.refreshCaches()
+			a.chat.AddMessage(chat.NewSystemMessage(a.session.Room,
+				"Welcome. The shelves are up front — grab a room after."))
+			if banner := a.store.GetBanner(); banner != "" {
+				a.chat.AddMessage(chat.NewBannerMessage(a.session.Room, banner))
+			}
+			return a, nil
+		}
 		if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 			// Changelog modal open on splash — only Esc closes it
 			if a.modal == ModalChangelog {
@@ -541,7 +618,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.doLayout()
 				a.refreshCaches()
 				a.chat.AddMessage(chat.NewSystemMessage(a.session.Room,
-					"Welcome to the tavern. Type /help for commands."))
+					"Welcome to the ryolink. Type /help for commands."))
 				if banner := a.store.GetBanner(); banner != "" {
 					a.chat.AddMessage(chat.NewBannerMessage(a.session.Room, banner))
 				}
@@ -574,6 +651,21 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Global keybinds — F-keys and ctrl sequences safe for SSH
 	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 		switch keyMsg.String() {
+		case "ctrl+m":
+			a.mouseOn = !a.mouseOn
+			if a.mouseOn {
+				a.chat.AddSystemLog("cursor mode on — clicks drive the app (ctrl+m toggles)")
+			} else {
+				a.chat.AddSystemLog("cursor mode off — keyboard only (ctrl+m toggles)")
+			}
+			return a, nil
+		case "ctrl+p":
+			a.modal = ModalPalette
+			a.paletteModal = NewPaletteModal()
+			return a, nil
+		case "ctrl+r":
+			a.openRoomsModal()
+			return a, nil
 		case "f1":
 			a.modal = ModalHelp
 			a.helpModal = NewHelpModal()
@@ -589,13 +681,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.nickModal = NewNickModal(a.session.Nickname)
 			return a, nil
 		case "f3":
-			allRooms := a.store.AllRooms()
-			var counts []int
-			for _, rName := range allRooms {
-				counts = append(counts, len(a.hub.Sessions(rName)))
-			}
-			a.modal = ModalJoinRoom
-			a.joinRoomModal = NewJoinRoomModal(allRooms, counts, a.session.Room, a.roomTypes)
+			a.openRoomsModal()
 			return a, nil
 		case "f4":
 			unread := a.unreadMentions()
@@ -715,6 +801,45 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Gallery room: single-key shortcuts + mouse
+	// Store room: the storefront owns the column, click-first.
+	if a.roomTypes[a.session.Room] == "store" && a.storefront != nil {
+		if a.shop != nil {
+			title, items := a.shop()
+			if title != "" {
+				a.storefront.title = title
+			}
+			a.storefront.SetItems(items)
+		}
+		sf := a.storefront
+		var cmd tea.Cmd
+		sf, cmd = sf.Update(msg)
+		a.storefront = sf
+		switch msg := msg.(type) {
+		case tea.KeyPressMsg:
+			switch msg.String() {
+			case "ctrl+c":
+				return a, tea.Quit
+			case "esc":
+				if bar := a.roomByType("chat"); bar != "" {
+					a.switchRoom(bar)
+				} else {
+					a.switchRoom(a.firstRoom)
+				}
+				return a, nil
+			}
+		case tea.MouseWheelMsg:
+			return a, cmd
+		}
+		// typing "/" jumps to the lounge chat input
+		if keyMsg, ok := msg.(tea.KeyPressMsg); ok && keyMsg.String() == "/" {
+			if bar := a.roomByType("chat"); bar != "" {
+				a.switchRoom(bar)
+			}
+			return a, nil
+		}
+		return a, cmd
+	}
+
 	if a.roomTypes[a.session.Room] == "gallery" {
 		switch msg := msg.(type) {
 		case tea.KeyPressMsg:
@@ -732,13 +857,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.nickModal = NewNickModal(a.session.Nickname)
 				return a, nil
 			case "j":
-				allRooms := a.store.AllRooms()
-				var counts []int
-				for _, rName := range allRooms {
-					counts = append(counts, len(a.hub.Sessions(rName)))
-				}
-				a.modal = ModalJoinRoom
-				a.joinRoomModal = NewJoinRoomModal(allRooms, counts, a.session.Room, a.roomTypes)
+				a.openRoomsModal()
 				return a, nil
 			case "h":
 				a.modal = ModalHelp
@@ -752,6 +871,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, cmd
 			}
 		case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseMotionMsg:
+			if !a.mouseOn {
+				return a, nil // cursor mode off: drag passthrough disabled
+			}
 			var cmd tea.Cmd
 			a.gallery, cmd = a.gallery.Update(msg)
 			return a, cmd
@@ -973,7 +1095,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if a.session.Room == a.firstRoom {
-		names = append(names, "bartender")
+		names = append(names, "Mika")
 	}
 	a.chat.UpdateMentionPopup(names)
 
@@ -1053,6 +1175,10 @@ func (a App) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ModalWargameRules:
 		var cmd tea.Cmd
 		a.wargameRulesModal, cmd = a.wargameRulesModal.Update(msg)
+		return a, cmd
+	case ModalPalette:
+		var cmd tea.Cmd
+		a.paletteModal, cmd = a.paletteModal.Update(msg)
 		return a, cmd
 	}
 	return a, nil
@@ -1210,7 +1336,7 @@ func (a *App) handleCommand(parsed chat.ParseResult) tea.Cmd {
 		return a.gifModal.Init()
 	case "addssh":
 		if !identity.IsOwnerFingerprint(a.session.Fingerprint, a.ownerFingerprint) {
-			a.chat.AddMessage(chat.NewSystemMessage(a.session.Room, "Only the tavern owner can do that."))
+			a.chat.AddMessage(chat.NewSystemMessage(a.session.Room, "Only ryolink owner can do that."))
 			return nil
 		}
 		addr := strings.TrimSpace(parsed.Args)
@@ -1226,7 +1352,7 @@ func (a *App) handleCommand(parsed chat.ParseResult) tea.Cmd {
 			fmt.Sprintf("Added: %s", addr)))
 	case "rmssh":
 		if !identity.IsOwnerFingerprint(a.session.Fingerprint, a.ownerFingerprint) {
-			a.chat.AddMessage(chat.NewSystemMessage(a.session.Room, "Only the tavern owner can do that."))
+			a.chat.AddMessage(chat.NewSystemMessage(a.session.Room, "Only ryolink owner can do that."))
 			return nil
 		}
 		addr := strings.TrimSpace(parsed.Args)
@@ -1357,7 +1483,7 @@ func (a *App) handleHubMsg(msg session.Msg) {
 		a.doLayout()
 		a.chat.SetOwnNickname(a.session.Nickname)
 		a.chat.AddMessage(chat.NewSystemMessage(a.session.Room,
-			"The tavern has been swept clean."))
+			"The Ryolink has been swept clean."))
 	case session.MsgTyping:
 		if msg.Nickname != a.session.Nickname {
 			a.chat.SetTyping(msg.Nickname)
@@ -1477,7 +1603,7 @@ func (a *App) handleHubMsg(msg session.Msg) {
 				a.dmStore.MarkRead(a.session.Fingerprint, msg.Fingerprint)
 			}
 		} else {
-			// Show notification in tavern chat
+			// Show notification in ryolink chat
 			a.chat.AddSystemLog(fmt.Sprintf("DM from %s", msg.Nickname))
 		}
 	}
@@ -1630,7 +1756,7 @@ func (a *App) refreshCaches() {
 		names = append(names, name)
 	}
 	if a.session.Room == a.firstRoom {
-		names = append(names, "◆ bartender")
+		names = append(names, "◆ Mika")
 	}
 	sort.Strings(names)
 	a.cachedOnlineNames = names
@@ -1713,6 +1839,96 @@ func (a *App) toggleDMMode() {
 	}
 }
 
+// openRoomsModal builds the room list with live occupant counts and opens
+// the join modal. Shared by f3, ctrl+r, the gallery j-key, and the palette.
+func (a *App) openRoomsModal() {
+	allRooms := a.store.AllRooms()
+	var counts []int
+	for _, rName := range allRooms {
+		counts = append(counts, len(a.hub.Sessions(rName)))
+	}
+	a.modal = ModalJoinRoom
+	a.joinRoomModal = NewJoinRoomModal(allRooms, counts, a.session.Room, a.roomTypes)
+}
+
+// runPaletteCommand executes a palette entry by id. Each case mirrors the
+// direct keybind so both paths behave identically.
+func (a *App) runPaletteCommand(id string) (tea.Model, tea.Cmd) {
+	switch id {
+	case "rooms":
+		a.openRoomsModal()
+	case "store":
+		if room := a.roomByType("store"); room != "" && room != a.session.Room {
+			a.switchRoom(room)
+		}
+	case "nick":
+		a.modal = ModalNick
+		a.nickModal = NewNickModal(a.session.Nickname)
+	case "mentions":
+		unread := a.unreadMentions()
+		if len(unread) == 0 {
+			a.chat.AddMessage(chat.NewSystemMessage(a.session.Room, "No recent mentions"))
+			return a, nil
+		}
+		contexts := a.buildMentionContexts(unread)
+		a.modal = ModalMention
+		a.mentionModal = NewMentionModal(unread, contexts)
+		a.markMentionRead(0)
+	case "post":
+		a.modal = ModalPost
+		a.postModal = NewPostModal()
+	case "tankard":
+		a.tankardFocused = !a.tankardFocused
+		a.tankard.focused = a.tankardFocused
+	case "leaderboard":
+		if a.wargameStore != nil {
+			entries := a.wargameStore.Leaderboard(10)
+			progress := a.wargameStore.UserProgress(a.session.Fingerprint, a.wargameRoomNames()...)
+			a.modal = ModalLeaderboard
+			a.leaderboardModal = NewLeaderboardModal(entries, progress, a.session.Fingerprint)
+		}
+	case "dm":
+		if a.dmStore != nil {
+			a.toggleDMMode()
+		}
+	case "feed":
+		if a.session.Room == a.firstRoom && a.redditClient != nil {
+			a.feedActive = !a.feedActive
+			a.feedFocused = a.feedActive
+			if a.feedActive {
+				a.chat.input.Blur()
+			} else {
+				a.chat.input.Focus()
+			}
+			a.doLayout()
+		}
+	case "gif":
+		// stage the command in the input; the user types the search
+		if a.gifClient == nil {
+			a.chat.AddMessage(chat.NewSystemMessage(a.session.Room, "GIF search is not enabled."))
+			return a, nil
+		}
+		a.chat.input.SetValue("/gif ")
+		a.chat.input.Focus()
+	case "cursor":
+		a.mouseOn = !a.mouseOn
+		if a.mouseOn {
+			a.chat.AddSystemLog("cursor mode on — clicks drive the app (ctrl+m toggles)")
+		} else {
+			a.chat.AddSystemLog("cursor mode off — keyboard only (ctrl+m toggles)")
+		}
+	case "help":
+		a.modal = ModalHelp
+		a.helpModal = NewHelpModal()
+	case "changelog":
+		a.modal = ModalChangelog
+		a.changelogModal = NewChangelogModal()
+	case "quit":
+		return a, tea.Quit
+	}
+	return a, nil
+}
+
 func (a *App) switchRoom(target string) {
 	oldRoom := a.session.Room
 
@@ -1732,6 +1948,20 @@ func (a *App) switchRoom(target string) {
 	a.chat.OwnerFingerprint = a.ownerFingerprint
 	a.doLayout()
 	a.chat.SetOwnNickname(a.session.Nickname)
+
+	if a.roomTypes[target] == "store" {
+		if a.storefront == nil {
+			title := "Ryoku Store"
+			var items []StoreItemView
+			if a.shop != nil {
+				title, items = a.shop()
+			}
+			a.storefront = NewStorefront(title)
+			a.storefront.SetItems(items)
+		}
+		a.doLayout()
+		return
+	}
 
 	if a.roomTypes[target] == "gallery" {
 		// Load gallery notes
@@ -1900,6 +2130,23 @@ func (a *App) doLayout() {
 		chatHeight -= 4 // wargame header takes 4 lines
 	}
 	a.chat.SetSize(chatWidth, chatHeight)
+	// Landing on a store room straight from the splash never runs
+	// switchRoom, so the storefront must bootstrap here too.
+	if a.roomTypes[a.session.Room] == "store" && a.storefront == nil {
+		title := "Ryoku Store"
+		var items []StoreItemView
+		if a.shop != nil {
+			title, items = a.shop()
+		}
+		a.storefront = NewStorefront(title)
+		a.storefront.SetItems(items)
+	}
+	if a.storefront != nil {
+		a.storefront.SetSize(chatWidth, mainHeight)
+		// topBar rows + the storefront's own 4-line header (title, sub,
+		// rule, blank) before the first item block
+		a.storefront.SetOrigin(topBarHeight + 4)
+	}
 	a.gallery.SetSize(chatWidth, mainHeight)
 	a.gallery.SetScreenOffset(roomsWidth, topBarHeight)
 	if a.sudokuView != nil {
@@ -1977,6 +2224,8 @@ func (a App) View() tea.View {
 		} else {
 			centerView = a.dmInbox.View()
 		}
+	} else if a.roomTypes[a.session.Room] == "store" && a.storefront != nil {
+		centerView = a.storefront.View()
 	} else if a.roomTypes[a.session.Room] == "gallery" {
 		centerView = a.gallery.View()
 	} else if a.roomTypes[a.session.Room] == "games" && a.sudokuView != nil {
@@ -2047,6 +2296,8 @@ func (a App) View() tea.View {
 			modalBox = a.leaderboardModal.View(a.width, a.height)
 		case ModalWargameRules:
 			modalBox = a.wargameRulesModal.View(a.width, a.height)
+		case ModalPalette:
+			modalBox = a.paletteModal.View(a.width, a.height)
 		}
 		base = Overlay(base, modalBox, a.width, a.height)
 	}
@@ -2058,8 +2309,12 @@ func (a App) View() tea.View {
 
 	v := tea.NewView(base)
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
-	v.WindowTitle = a.tavernDomain
+	if a.mouseOn {
+		v.MouseMode = tea.MouseModeCellMotion
+	} else {
+		v.MouseMode = tea.MouseModeNone
+	}
+	v.WindowTitle = a.ryolinkDomain
 	return v
 }
 

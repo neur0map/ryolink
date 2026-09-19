@@ -1,6 +1,9 @@
-# VPS Setup Guide
+# Production Setup Guide
 
-Full procedure to bring up a new tavrn.sh server from a blank Ubuntu 22.04 VPS.
+Bringing up a `ssh ryoku.dev` ryolink on a blank Ubuntu 24.04 server.
+The whole product is ONE static binary: server, admin CLI, and all default
+content (radio catalogue, bartender persona, mystery case) are embedded.
+
 Run every command as **root** unless the step says otherwise.
 
 ---
@@ -9,27 +12,164 @@ Run every command as **root** unless the step says otherwise.
 
 ```bash
 apt update && apt upgrade -y
-apt install -y git curl wget ufw fail2ban libcap2-bin
+apt install -y ufw fail2ban libcap2-bin curl
 ```
 
 ---
 
-## 2. Install Go
+## 2. Create the service user and install the binary
 
 ```bash
-GO_VERSION=1.24.1
-curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
-rm -rf /usr/local/go
-tar -C /usr/local -xzf /tmp/go.tar.gz
-rm /tmp/go.tar.gz
-echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile.d/go.sh
-source /etc/profile.d/go.sh
-go version
+useradd -m -s /bin/bash ryolink
+install -m 0755 -o root -g root ryolink /usr/local/bin/ryolink   # the binary you built
+```
+
+No Go toolchain is needed on the server. Build the binary wherever you like
+(any machine, `CGO_ENABLED=0 go build ./cmd/ryolink`) and copy it over.
+
+---
+
+## 3. Configure the instance (one YAML)
+
+As the `ryolink` user:
+
+```bash
+sudo -u ryolink mkdir -p /home/ryolink/.config/ryolink
+sudo -u ryolink ryolink init --domain ryoku.dev --port 22
+sudo -u ryolink nano /home/ryolink/.config/ryolink/ryolink.yaml
+```
+
+`init` writes a fully-commented config with working defaults for everything:
+identity, owner, ports, data dir, idle timeout, web audio, and the whole
+**security** block (connection budgets, ban thresholds, deny/allow CIDRs).
+The only value it cannot guess is your owner nickname — edit `owner.name`,
+and verify `owner.fingerprint` (it auto-detects from `~/.ssh/id_*.pub` if one
+exists on this machine; otherwise paste the output of
+`ssh-keygen -lf ~/.ssh/id_ed25519.pub` from YOUR laptop).
+
+Everything the instance writes (db, host key, logs, admin signals) lives in
+`server.data_dir` — default `/home/ryolink/.local/share/ryolink`. Back that
+directory up; `id_ed25519` inside it is ryolink's SSH identity.
+
+> **Canonical config:** `service install` (step 5) stages a copy to
+> `/etc/ryolink/ryolink.yaml`, and from then on **that** file is what both
+> the server and every `ryolink` admin command read. Edit it (then
+> `ryolink service restart`) — re-running `service install` overwrites it
+> from whatever config you point `--config` at.
+
+Optional secrets — keep them OUT of the YAML:
+
+```bash
+mkdir -p /etc/ryolink
+cat > /etc/ryolink/env << 'EOF'
+OPENAI_API_KEY=          # bartender
+KLIPY_API_KEY=           # /gif search
+EXA_API_KEY=             # bartender web search
+REDDIT_CLIENT_ID=        # reddit feed (see §7)
+REDDIT_CLIENT_SECRET=
+EOF
+chmod 640 /etc/ryolink/env && chown root:ryolink /etc/ryolink/env
+```
+
+(Environment variables win over `api:` values in the config.)
+
+---
+
+## 4. Move the admin SSH off port 22 — BEFORE starting ryolink
+
+Port 22 belongs to ryolink in production; sshd relocates to 2222 and you
+lock it to your IPs.
+
+```bash
+# EDIT /etc/ssh/sshd_config (or a drop-in in sshd_config.d/):
+#   Port 2222
+#   PasswordAuthentication no
+#   PermitRootLogin no
+#   MaxAuthTries 3
+#   LoginGraceTime 30
+install -d -m 755 /etc/ssh/sshd_config.d
+printf 'Port 2222\nPasswordAuthentication no\nPermitRootLogin no\n' \
+  > /etc/ssh/sshd_config.d/99-ryolink.conf
+
+# KEEP YOUR CURRENT SESSION OPEN. From your laptop, in a NEW terminal:
+ssh -p 2222 root@<VPS_IP>        # must work before you continue
+systemctl restart ssh
+```
+
+If you connect through a firewall, also allow 2222 from your IP only.
+
+---
+
+## 5. Install the service
+
+```bash
+ryolink service install --user ryolink \
+  --binary /usr/local/bin/ryolink \
+  --config /home/ryolink/.config/ryolink/ryolink.yaml
+```
+
+This generates `/etc/systemd/system/ryolink.service` from your config:
+non-root user, `CAP_NET_BIND_SERVICE` (the only capability),
+`ProtectSystem=strict` with the data dir as the sole writable path,
+`PrivateTmp`, `RestrictAddressFamilies`, `UMask=0077`, and reads
+`/etc/ryolink/env` if present. It then enables and starts it.
+
+```bash
+ryolink status      # config + live banner check + network bans
+ssh localhost -p 22 # you should land in the lounge with a ★ next to your name
 ```
 
 ---
 
-## 3. Install Caddy
+## 6. Firewall (UFW)
+
+```bash
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow from <YOUR_IP> to any port 2222 proto tcp   # admin SSH, pinned to you
+ufw allow 22/tcp       # ryolink chat
+ufw allow 80/tcp       # Caddy (redirects)
+ufw allow 443/tcp      # Caddy (landing page)
+ufw deny 2222/tcp      # admin SSH to everyone else
+ufw enable
+ufw status verbose
+```
+
+---
+
+## 7. fail2ban for the admin port
+
+ryolink firewalls its OWN port (see the security block in the config:
+per-IP budgets, auth-fail bans, scanner-probe bans — all in-process, all
+persisted). fail2ban is for the sshd that is left on 2222:
+
+```bash
+cat > /etc/fail2ban/jail.d/sshd-admin.conf << 'EOF'
+[sshd]
+enabled  = true
+port     = 2222
+maxretry = 3
+bantime  = 3600
+EOF
+systemctl enable --now fail2ban
+```
+
+Reddit feed credentials (optional): create a **web app** at
+<https://www.reddit.com/prefs/apps/>, redirect URI `http://localhost`, and
+put the id/secret in `/etc/ryolink/env`. Then:
+
+```bash
+sudo -u ryolink ryolink --feed-add archlinux linuxhyprland
+```
+
+---
+
+## 8. Caddy (TLS in front of ryolink's web surface)
+
+There is no static site to deploy anymore: **ryolink serves its own store
+landing page, catalog API, downloads, and radio** on one loopback port
+(`server.web_bind:server.web_port`, default `127.0.0.1:8090`). Caddy does
+TLS and publishes it.
 
 ```bash
 apt install -y debian-keyring debian-archive-keyring apt-transport-https
@@ -38,297 +178,73 @@ curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
   | tee /etc/apt/sources.list.d/caddy-stable.list
 apt update && apt install -y caddy
+
+cp deploy/Caddyfile /etc/caddy/Caddyfile
+systemctl restart caddy
 ```
 
----
-
-## 4. Create the tavrn user and clone the repo
-
-```bash
-useradd -m -s /bin/bash tavrn
-su - tavrn -c "
-  git clone https://github.com/neur0map/tavrn.git ~/tavrn
-"
-```
-
----
-
-## 5. Configure the tavern
-
-```bash
-# copy and edit the config (required — server won't start without it)
-su - tavrn -c "
-  cd ~/tavrn
-  cp tavern.yaml.example tavern.yaml
-"
-```
-
-Edit `tavern.yaml` with your values:
+One config change to make first: in `/etc/ryolink/ryolink.yaml` set
 
 ```yaml
-tavern:
-  name: "My Tavern"
-  domain: "mytavern.example"
-
-owner:
-  name: "yourname"           # Your reserved nickname (shown with a star)
-  fingerprint: "SHA256:..."  # Your SSH public key fingerprint
+store:
+  public_url: "https://ryoku.dev"   # canonical URL baked into every download link
 ```
 
-### Finding your SSH key fingerprint
+so the storefront, the TUI, and `curl` users all point at the HTTPS front
+instead of the raw port. The web surface stays loopback-only; Caddy is the
+only thing that can reach :8090.
 
-On your **local machine** (not the server), run:
+**Stocking the shelves.** Put artifacts in the data dir (default
+`/home/ryolink/.local/share/ryolink`), then reference them in `store.items`
+by relative path — the catalog picks up size and sha256 automatically, and
+the storefront re-checks disk every time it opens:
 
 ```bash
-ssh-keygen -lf ~/.ssh/id_ed25519.pub
-# or for RSA keys:
-ssh-keygen -lf ~/.ssh/id_rsa.pub
-```
-
-Output looks like:
-
-```
-256 SHA256:abc123def456... user@host (ED25519)
-```
-
-Copy the `SHA256:abc123def456...` part into the `fingerprint` field in `tavern.yaml`.
-
-This fingerprint is how the server identifies you as the owner when you connect via SSH. The owner gets:
-- A star flair next to their nickname
-- Access to admin chat commands (`/addroom`, `/renameroom`, `/ban`, etc.)
-- The bartender recognizes you as the boss
-
-### Environment variables
-
-```bash
-mkdir -p /etc/tavrn
-cat > /etc/tavrn/env << 'EOF'
-OPENAI_API_KEY=              # Required for bartender (GPT-powered)
-KLIPY_API_KEY=               # Required for /gif search
-EXA_API_KEY=                 # Optional — bartender web search context
-REDDIT_CLIENT_ID=            # Required for reddit feed (OAuth)
-REDDIT_CLIENT_SECRET=        # Required for reddit feed (OAuth)
-EOF
-```
-
-### Reddit feed credentials
-
-The reddit feed requires OAuth credentials to avoid IP blocks on cloud servers.
-
-1. Go to https://www.reddit.com/prefs/apps/ and click **"create another app..."**
-2. Set type to **web app**, pick any name, set redirect URI to `http://localhost`
-3. Note the **client ID** (string under the app name) and **secret**
-4. Add both to `/etc/tavrn/env`
-
-Then add subreddits to the feed:
-
-```bash
-cd /home/tavrn/tavrn
-sudo -u tavrn ./tavrn --feed-add golang commandline rust
-sudo -u tavrn ./tavrn --feed-list
-```
-
-Subreddits are stored in the database, not in config files. Always run admin commands from `/home/tavrn/tavrn` so they use the same database as the server.
-
----
-
-## 6. Build the server binary
-
-```bash
-su - tavrn -c "
-  export PATH=\$PATH:/usr/local/go/bin
-  cd ~/tavrn
-  go build -o tavrn ./cmd/tavrn-admin
-"
+sudo -u ryolink mkdir -p /home/ryolink/.local/share/ryolink/store
+sudo -u ryolink cp ~/ryoku-recovery.sh /home/ryolink/.local/share/ryolink/store/
+# large files (ISOs) belong on a mirror: give the item a `url:` instead of a
+# `path:` and ryolink redirects (and counts) the hop.
 ```
 
 ---
+## 9. Verify the deployment
 
-## 7. Install deploy assets
-
-Copy each file from this `deploy/` directory into its system location.
-
-### Systemd service
+From your laptop:
 
 ```bash
-cp /home/tavrn/tavrn/deploy/tavrn.service /etc/systemd/system/tavrn.service
-mkdir -p /etc/systemd/system/tavrn.service.d
-cp /home/tavrn/tavrn/deploy/tavrn.service.d/hardening.conf \
-   /etc/systemd/system/tavrn.service.d/hardening.conf
-systemctl daemon-reload
+bash deploy/verify.sh ryoku.dev
 ```
 
-### Root helper scripts
-
-```bash
-cp /home/tavrn/tavrn/deploy/sbin/tavrn-finalize-update /usr/local/sbin/tavrn-finalize-update
-chmod 755 /usr/local/sbin/tavrn-finalize-update
-chown root:root /usr/local/sbin/tavrn-finalize-update
-```
-
-### Sudoers rule
-
-```bash
-cp /home/tavrn/tavrn/deploy/sudoers.d/tavrn /etc/sudoers.d/tavrn
-chmod 440 /etc/sudoers.d/tavrn
-chown root:root /etc/sudoers.d/tavrn
-visudo -c   # verify no syntax errors
-```
-
-### Caddy config and web root
-
-```bash
-mkdir -p /var/www/tavrn
-cp /home/tavrn/tavrn/deploy/Caddyfile /etc/caddy/Caddyfile
-cp /home/tavrn/tavrn/deploy/www/goget.html /var/www/tavrn/goget.html
-# Copy website landing page if desired
-cp /home/tavrn/tavrn/website/* /var/www/tavrn/
-chown -R caddy:caddy /var/www/tavrn
-```
-
----
-
-## 7. Run the finalize script to set capabilities and symlinks
-
-```bash
-/usr/local/sbin/tavrn-finalize-update
-```
-
-This sets `cap_net_bind_service` on the binary, creates the `/usr/local/bin/tavrn`
-symlink, and starts the service.
-
----
-
-## 8. SSH hardening — move admin shell to port 2222
-
-Edit `/etc/ssh/sshd_config`:
-
-```bash
-# Change or add:
-Port 2222
-PasswordAuthentication no
-PermitRootLogin no
-MaxAuthTries 3
-LoginGraceTime 30
-```
-
-Then restart sshd:
-
-```bash
-systemctl restart ssh
-```
-
-> **Before closing your current session**, open a second terminal and confirm you can
-> reach port 2222 with your key. Port 22 is now owned by the tavrn Go process.
-
-### Lock admin SSH to specific IPs (recommended)
-
-Add to `/etc/ufw/before.rules` or use UFW's limit:
-
-```bash
-# Allow admin SSH only from known IPs:
-ufw allow from <YOUR_IP>     to any port 2222
-ufw allow from <OTHER_IP>    to any port 2222
-```
-
-Then deny it by default (done in step 10 below).
-
----
-
-## 10. Firewall (UFW)
-
-```bash
-ufw default deny incoming
-ufw default allow outgoing
-ufw allow 22/tcp      # tavrn SSH server (users)
-ufw allow 80/tcp      # Caddy HTTP (redirects to HTTPS)
-ufw allow 443/tcp     # Caddy HTTPS
-# Admin SSH (add per-IP rules above before this deny):
-ufw allow 2222/tcp    # or restrict to specific IPs as shown above
-ufw enable
-ufw status verbose
-```
-
----
-
-## 11. fail2ban
-
-The default install protects SSH. Enable it:
-
-```bash
-systemctl enable --now fail2ban
-# Verify it's watching the right port
-fail2ban-client status sshd
-```
-
-For port 2222, create `/etc/fail2ban/jail.d/tavrn-admin.conf`:
-
-```ini
-[sshd]
-enabled  = true
-port     = 2222
-maxretry = 3
-bantime  = 3600
-```
-
-```bash
-systemctl restart fail2ban
-```
-
----
-
-## 12. Enable and start services
-
-```bash
-systemctl enable --now tavrn
-systemctl enable --now caddy
-systemctl status tavrn
-systemctl status caddy
-```
-
----
-
-## 13. Verify the deployment
-
-Run the verification script from your local machine (see `deploy/verify.sh`):
-
-```bash
-bash deploy/verify.sh tavrn.sh
-```
-
-Or check manually:
-
-```bash
-# Vanity import
-curl -s "https://tavrn.sh/?go-get=1" | grep go-import
-
-# SSH port 22 (tavrn)
-ssh -o ConnectTimeout=5 -o BatchMode=yes tavrn.sh 2>&1 | head -1
-
-# Admin port 2222
-ssh -p 2222 -o ConnectTimeout=5 tavrn@<VPS_IP> "systemctl status tavrn --no-pager"
-```
-
+Checks the port-22 SSH banner (ryolink), the HTTPS store landing page, TLS
+expiry, and the catalog API through Caddy.
 ---
 
 ## Ongoing maintenance
 
-### Update server + restart
-
-As the `tavrn` user on the VPS (via admin SSH):
+### Live admin (as the ryolink user, no restart needed)
 
 ```bash
-~/tavrn/tavrn --update
+sudo -u ryolink ryolink --message "brb 5m"       # banner to everyone
+sudo -u ryolink ryolink --add-room "linux"
+sudo -u ryolink ryolink --ban "grief_nick"       # kicks + blocks the identity
+sudo -u ryolink ryolink --deny 198.51.100.0/24   # blocks the NETWORK (live, persistent)
+sudo -u ryolink ryolink --deny-list
+sudo -u ryolink ryolink purge                    # wipe weekly data (bans survive)
 ```
 
-### Send a message to all connected users
+### Updating
+
+Replace `/usr/local/bin/ryolink` with a new build (the binary carries its own
+assets), then:
 
 ```bash
-~/tavrn/tavrn --message "Maintenance in 5 minutes"
+ryolink service restart
 ```
 
-### Purge all data
+If you deployed from a git clone instead, `ryolink --update` pulls, rebuilds,
+swaps, and restarts in one step.
 
-```bash
-~/tavrn/tavrn purge
-```
+### Banning etiquette
+
+`--ban` removes a person (their key fingerprint); `--deny` removes a network
+(the guard auto-bans the worst offenders on its own — see `ryolink status`).

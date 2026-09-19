@@ -1,7 +1,7 @@
 package hub
 
 import (
-	"tavrn.sh/internal/session"
+	"ryolink/internal/session"
 	"testing"
 	"time"
 )

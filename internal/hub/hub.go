@@ -1,8 +1,8 @@
 package hub
 
 import (
+	"ryolink/internal/session"
 	"sync"
-	"tavrn.sh/internal/session"
 )
 
 type Hub struct {

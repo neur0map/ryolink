@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
-	"tavrn.sh/internal/chat"
+	"ryolink/internal/chat"
 )
 
 const maxAnimatingGifs = 3

@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"tavrn.sh/internal/poll"
+	"ryolink/internal/poll"
 )
 
 // PollVoteMsg signals a vote was cast.

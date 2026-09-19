@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -15,23 +17,25 @@ import (
 	"text/template"
 	"time"
 
-	"tavrn.sh/internal/bartender"
-	"tavrn.sh/internal/config"
-	"tavrn.sh/internal/dm"
-	"tavrn.sh/internal/gif"
-	"tavrn.sh/internal/hub"
-	"tavrn.sh/internal/jukebox"
-	"tavrn.sh/internal/mystery"
-	"tavrn.sh/internal/poll"
-	"tavrn.sh/internal/reddit"
-	"tavrn.sh/internal/sanitize"
-	"tavrn.sh/internal/search"
-	"tavrn.sh/internal/server"
-	"tavrn.sh/internal/session"
-	"tavrn.sh/internal/store"
-	"tavrn.sh/internal/sudoku"
-	"tavrn.sh/internal/wargame"
-	"tavrn.sh/internal/webstream"
+	"ryolink/internal/bartender"
+	"ryolink/internal/config"
+	"ryolink/internal/dm"
+	"ryolink/internal/gif"
+	"ryolink/internal/guard"
+	"ryolink/internal/hub"
+	"ryolink/internal/jukebox"
+	"ryolink/internal/mystery"
+	"ryolink/internal/poll"
+	"ryolink/internal/reddit"
+	"ryolink/internal/sanitize"
+	"ryolink/internal/search"
+	"ryolink/internal/server"
+	"ryolink/internal/session"
+	"ryolink/internal/shop"
+	"ryolink/internal/store"
+	"ryolink/internal/sudoku"
+	"ryolink/internal/wargame"
+	"ryolink/internal/webstream"
 )
 
 const bannerFile = ".banner"
@@ -41,51 +45,69 @@ const renameRoomFile = ".renameroom"
 const removeRoomFile = ".removeroom"
 const banFile = ".ban"
 const purgeFile = ".purge"
+const denyFile = ".deny"
 
 func main() {
+	// `init` must run before config resolution (it creates the config).
+	if len(os.Args) > 1 && os.Args[1] == "init" {
+		runInit(os.Args[2:])
+		return
+	}
+	// Resolve the data dir (and thus every runtime path) before dispatching
+	// any verb, so admin signal files land where the server watches them.
+	loadConfigForAdmin()
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "up":
+			runUp()
+			return
+		case "service":
+			runService(os.Args[2:])
+			return
+		case "status":
+			runStatus()
+			return
 		case "purge":
 			runPurge()
 			return
 		case "--message":
 			if len(os.Args) < 3 {
-				fmt.Println("Usage: tavrn --message \"your message here\"")
+				fmt.Println("Usage: ryolink --message \"your message here\"")
 				os.Exit(1)
 			}
 			runMessage(os.Args[2])
 			return
 		case "--add-room":
 			if len(os.Args) < 3 {
-				fmt.Println("Usage: tavrn --add-room \"room_name\"")
+				fmt.Println("Usage: ryolink --add-room \"room_name\"")
 				os.Exit(1)
 			}
 			runAddRoom(os.Args[2])
 			return
 		case "--rename-room":
 			if len(os.Args) < 4 {
-				fmt.Println("Usage: tavrn --rename-room \"old_name\" \"new_name\"")
+				fmt.Println("Usage: ryolink --rename-room \"old_name\" \"new_name\"")
 				os.Exit(1)
 			}
 			runRenameRoom(os.Args[2], os.Args[3])
 			return
 		case "--remove-room":
 			if len(os.Args) < 3 {
-				fmt.Println("Usage: tavrn --remove-room \"room_name\"")
+				fmt.Println("Usage: ryolink --remove-room \"room_name\"")
 				os.Exit(1)
 			}
 			runRemoveRoom(os.Args[2])
 			return
 		case "--ban":
 			if len(os.Args) < 3 {
-				fmt.Println("Usage: tavrn --ban \"nickname\"")
+				fmt.Println("Usage: ryolink --ban \"nickname\"")
 				os.Exit(1)
 			}
 			runBan(os.Args[2])
 			return
 		case "--unban":
 			if len(os.Args) < 3 {
-				fmt.Println("Usage: tavrn --unban \"nickname\"")
+				fmt.Println("Usage: ryolink --unban \"nickname\"")
 				os.Exit(1)
 			}
 			runUnban(os.Args[2])
@@ -93,29 +115,50 @@ func main() {
 		case "--ban-list":
 			runBanList()
 			return
+		case "--deny":
+			if len(os.Args) < 3 {
+				fmt.Println("Usage: ryolink --deny <cidr|ip> [reason]")
+				os.Exit(1)
+			}
+			reason := "banned by admin"
+			if len(os.Args) > 3 {
+				reason = strings.Join(os.Args[3:], " ")
+			}
+			runDeny(os.Args[2], reason)
+			return
+		case "--undeny":
+			if len(os.Args) < 3 {
+				fmt.Println("Usage: ryolink --undeny <cidr|ip>")
+				os.Exit(1)
+			}
+			runUndeny(os.Args[2])
+			return
+		case "--deny-list":
+			runDenyList()
+			return
 		case "--clear-banner":
 			runClearBanner()
 			return
 		case "--set-flag":
 			if len(os.Args) < 5 {
-				fmt.Println("Usage: tavrn --set-flag <wargame> <level> <flag>")
+				fmt.Println("Usage: ryolink --set-flag <wargame> <level> <flag>")
 				os.Exit(1)
 			}
 			runSetFlag(os.Args[2], os.Args[3], os.Args[4])
 			return
 		case "--list-flags":
 			if len(os.Args) < 3 {
-				fmt.Println("Usage: tavrn --list-flags <wargame>")
+				fmt.Println("Usage: ryolink --list-flags <wargame>")
 				os.Exit(1)
 			}
 			runListFlags(os.Args[2])
 			return
 		case "--bartender-off":
-			os.WriteFile(resolvedPath(bartenderToggleFile), []byte("off"), 0600)
+			os.WriteFile(dataPath(bartenderToggleFile), []byte("off"), 0600)
 			fmt.Println("Bartender disable signal sent.")
 			return
 		case "--bartender-on":
-			os.WriteFile(resolvedPath(bartenderToggleFile), []byte("on"), 0600)
+			os.WriteFile(dataPath(bartenderToggleFile), []byte("on"), 0600)
 			fmt.Println("Bartender enable signal sent.")
 			return
 		case "--update":
@@ -125,14 +168,14 @@ func main() {
 			return
 		case "--feed-add":
 			if len(os.Args) < 3 {
-				fmt.Println("Usage: tavrn --feed-add <subreddit> [subreddit...]")
+				fmt.Println("Usage: ryolink --feed-add <subreddit> [subreddit...]")
 				os.Exit(1)
 			}
 			runFeedAdd(os.Args[2:])
 			return
 		case "--feed-remove":
 			if len(os.Args) < 3 {
-				fmt.Println("Usage: tavrn --feed-remove <subreddit>")
+				fmt.Println("Usage: ryolink --feed-remove <subreddit>")
 				os.Exit(1)
 			}
 			runFeedRemove(os.Args[2])
@@ -141,40 +184,49 @@ func main() {
 			runFeedList()
 			return
 		case "help", "--help", "-h":
-			fmt.Println("Maintainer commands:")
-			fmt.Println("  tavrn                            Start the SSH server")
-			fmt.Println("  tavrn purge                      Purge all data")
-			fmt.Println("  tavrn --message \"text\"           Send banner to all connected users")
-			fmt.Println("  tavrn --clear-banner             Clear the active banner")
-			fmt.Println("  tavrn --add-room \"name\"          Add a new room (live, no restart)")
-			fmt.Println("  tavrn --rename-room \"old\" \"new\"  Rename a room (live)")
-			fmt.Println("  tavrn --remove-room \"name\"       Remove a room (live, moves users to #lounge)")
-			fmt.Println("  tavrn --ban \"nickname\"           Ban a user by nickname (live, kicks them)")
-			fmt.Println("  tavrn --unban \"nickname\"         Unban a user by nickname")
-			fmt.Println("  tavrn --ban-list                 Show all active bans")
-			fmt.Println("  tavrn --bartender-off            Disable bartender (live)")
-			fmt.Println("  tavrn --bartender-on             Enable bartender (live)")
-			fmt.Println("  tavrn --set-flag bandit 1 \"flag\" Set a wargame flag (bandit/natas/leviathan)")
-			fmt.Println("  tavrn --list-flags bandit         List levels with flags for a wargame")
-			fmt.Println("  tavrn --feed-add <sub> [sub...]  Add subreddit(s) to feed")
-			fmt.Println("  tavrn --feed-remove <sub>        Remove subreddit from feed")
-			fmt.Println("  tavrn --feed-list                List feed subreddits")
-			fmt.Println("  tavrn --update                   Pull main, rebuild, restart service")
-			fmt.Println("  tavrn --web-audio                Start with web audio streaming on :8090")
+			printUsage()
 			return
+		default:
+			fmt.Printf("unknown command: %s\n\n", os.Args[1])
+			printUsage()
+			os.Exit(1)
 		}
 	}
 
+	// bare `ryolink` starts the server (the systemd unit runs `ryolink up`;
+	// both work). This is the same behaviour as before the rework.
 	runServer()
 }
 
-func getPort() int {
-	if p := os.Getenv("TAVRN_PORT"); p != "" {
-		if n, err := strconv.Atoi(p); err == nil {
-			return n
-		}
-	}
-	return 2222
+func printUsage() {
+	fmt.Println("ryolink — a chatroom over SSH. Single binary: server + admin CLI.")
+	fmt.Println()
+	fmt.Println("Setup:")
+	fmt.Println("  ryolink init [--domain D] [--port P]     Write a starter config (~/.config/ryolink)")
+	fmt.Println("  ryolink up                               Run the server in the foreground")
+	fmt.Println("  sudo ryolink service install             Install + start the hardened systemd unit")
+	fmt.Println("  ryolink status                           Config, liveness, bans at a glance")
+	fmt.Println()
+	fmt.Println("Admin (live, via the data dir signal files):")
+	fmt.Println("  ryolink --message \"text\"                 Banner to all connected users")
+	fmt.Println("  ryolink --clear-banner                   Clear the banner")
+	fmt.Println("  ryolink --add-room \"name\"                Add a room (no restart)")
+	fmt.Println("  ryolink --rename-room \"old\" \"new\"        Rename a room")
+	fmt.Println("  ryolink --remove-room \"name\"             Remove a room")
+	fmt.Println("  ryolink --ban \"nickname\"                 Ban a user by nickname (kicks them)")
+	fmt.Println("  ryolink --unban \"nickname\"               Unban a user")
+	fmt.Println("  ryolink --ban-list                       Show user bans")
+	fmt.Println("  ryolink --deny <cidr> [reason]           Ban a network (live, persistent)")
+	fmt.Println("  ryolink --undeny <cidr>                  Lift a network ban")
+	fmt.Println("  ryolink --deny-list                      Show network bans")
+	fmt.Println("  ryolink --bartender-off / --bartender-on Toggle the bartender (live)")
+	fmt.Println("  ryolink --set-flag <game> <lvl> \"flag\"   Set a wargame flag")
+	fmt.Println("  ryolink --list-flags <game>              List wargame flags")
+	fmt.Println("  ryolink --feed-add <sub> [sub...]        Add subreddit(s) to the feed")
+	fmt.Println("  ryolink --feed-remove <sub>              Remove a subreddit")
+	fmt.Println("  ryolink --feed-list                      List feed subreddits")
+	fmt.Println("  ryolink purge                            Purge weekly data (bans survive)")
+	fmt.Println("  ryolink --update                         Git dev deploy: pull, rebuild, restart")
 }
 
 func hasFlag(flag string) bool {
@@ -187,7 +239,7 @@ func hasFlag(flag string) bool {
 }
 
 func runMessage(text string) {
-	if err := os.WriteFile(resolvedPath(bannerFile), []byte(text), 0600); err != nil {
+	if err := os.WriteFile(dataPath(bannerFile), []byte(text), 0600); err != nil {
 		log.Fatalf("failed to write banner: %v", err)
 	}
 	fmt.Printf("Banner sent: %s\n", text)
@@ -209,7 +261,7 @@ func runAddRoom(name string) {
 		fmt.Println("Room name cannot be empty.")
 		os.Exit(1)
 	}
-	if err := os.WriteFile(resolvedPath(addRoomFile), []byte(name), 0600); err != nil {
+	if err := os.WriteFile(dataPath(addRoomFile), []byte(name), 0600); err != nil {
 		log.Fatalf("failed to write addroom file: %v", err)
 	}
 	fmt.Printf("Room queued: #%s (will appear when server picks it up)\n", name)
@@ -224,7 +276,7 @@ func runRenameRoom(oldName, newName string) {
 	}
 	// Format: "old:new"
 	payload := oldName + ":" + newName
-	if err := os.WriteFile(resolvedPath(renameRoomFile), []byte(payload), 0600); err != nil {
+	if err := os.WriteFile(dataPath(renameRoomFile), []byte(payload), 0600); err != nil {
 		log.Fatalf("failed to write rename file: %v", err)
 	}
 	fmt.Printf("Rename queued: #%s → #%s (will apply when server picks it up)\n", oldName, newName)
@@ -238,14 +290,14 @@ func runRemoveRoom(name string) {
 	}
 	// Protect the landing room
 	firstRoom := "lounge" // fallback
-	if cfg, err := config.Load(resolvedPath("tavern.yaml")); err == nil {
+	if cfg, err := config.Load(findConfig()); err == nil {
 		firstRoom = cfg.FirstRoom()
 	}
 	if name == firstRoom {
 		fmt.Printf("Cannot remove the landing room #%s\n", name)
 		os.Exit(1)
 	}
-	if err := os.WriteFile(resolvedPath(removeRoomFile), []byte(name), 0600); err != nil {
+	if err := os.WriteFile(dataPath(removeRoomFile), []byte(name), 0600); err != nil {
 		log.Fatalf("failed to write remove file: %v", err)
 	}
 	fmt.Printf("Remove queued: #%s (users will be moved to #%s)\n", name, firstRoom)
@@ -274,7 +326,7 @@ func runBan(nickname string) {
 	}
 
 	// Signal the server to kick them
-	if err := os.WriteFile(resolvedPath(banFile), []byte(fp), 0600); err != nil {
+	if err := os.WriteFile(dataPath(banFile), []byte(fp), 0600); err != nil {
 		log.Fatalf("failed to write ban file: %v", err)
 	}
 
@@ -425,7 +477,7 @@ func runFeedList() {
 
 func runPurge() {
 	// Broadcast purge to connected clients before wiping
-	os.WriteFile(resolvedPath(purgeFile), []byte("1"), 0600)
+	os.WriteFile(dataPath(purgeFile), []byte("1"), 0600)
 	fmt.Println("Signaled connected clients...")
 	time.Sleep(2 * time.Second) // give server time to broadcast
 
@@ -442,36 +494,29 @@ func runPurge() {
 	st.Close()
 
 	fmt.Println("Restarting server...")
-	cmd := exec.Command("sudo", "/usr/bin/systemctl", "restart", "tavrn")
+	cmd := exec.Command("sudo", "/usr/bin/systemctl", "restart", "ryolink")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		log.Printf("restart failed: %v (restart manually with: sudo systemctl restart tavrn)", err)
+		log.Printf("restart failed: %v (restart manually with: sudo systemctl restart ryolink)", err)
 	} else {
 		fmt.Println("Done. Server restarted with clean state.")
 	}
 }
 
 func runServer() {
-	// log to file
-	logFile, err := os.OpenFile("tavrn.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err == nil {
-		log.SetOutput(logFile)
-		defer logFile.Close()
-	}
-
-	// config
-	configPath := resolvedPath("tavern.yaml")
-	if _, statErr := os.Stat(configPath); os.IsNotExist(statErr) {
-		fmt.Fprintln(os.Stderr, "ERROR: tavern.yaml not found.")
+	// config: explicit env, cwd, or the user/system config dir
+	configPath := findConfig()
+	if configPath == "" {
+		fmt.Fprintln(os.Stderr, "ERROR: no ryolink.yaml found.")
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "This is the tavern engine — you need to configure your own tavern.")
+		fmt.Fprintln(os.Stderr, "Configure your instance in one step:")
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "  cp tavern.yaml.example tavern.yaml")
-		fmt.Fprintln(os.Stderr, "  # edit tavern.yaml with your tavern name, domain, and SSH fingerprint")
+		fmt.Fprintln(os.Stderr, "  ryolink init                # writes ~/.config/ryolink/ryolink.yaml")
+		fmt.Fprintln(os.Stderr, "  ryolink up                  # run it")
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "To find your SSH key fingerprint:")
-		fmt.Fprintln(os.Stderr, "  ssh-keygen -lf ~/.ssh/id_ed25519.pub")
+		fmt.Fprintln(os.Stderr, "Or drop a ryolink.yaml next to this binary / in the working directory.")
+		fmt.Fprintln(os.Stderr, "Your owner fingerprint: ssh-keygen -lf ~/.ssh/id_ed25519.pub")
 		os.Exit(1)
 	}
 	cfg, err := config.Load(configPath)
@@ -479,6 +524,19 @@ func runServer() {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 		os.Exit(1)
 	}
+	resolveDataDir(cfg, configPath)
+
+	// logging: a configured file, or stderr (journald captures it in service
+	// mode). The old behaviour (ryolink.log in the data dir) is the template
+	// default for non-service runs.
+	if cfg.Server.LogFile != "" {
+		logFile, err := os.OpenFile(cfg.Server.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err == nil {
+			log.SetOutput(logFile)
+			defer logFile.Close()
+		}
+	}
+
 	sanitize.SetOwnerNick(cfg.Owner.Name)
 
 	st, err := store.New(resolvedDBPath())
@@ -491,12 +549,32 @@ func runServer() {
 	h := hub.New()
 	go h.Run()
 
-	if _, err := os.Stat(".ssh"); os.IsNotExist(err) {
-		os.MkdirAll(".ssh", 0700)
+	// host key lives with the instance data; wish generates it on first start.
+	// Back this file up: losing it changes ryolink's SSH identity for every
+	// returning user.
+	hostKeyDir := filepath.Join(dataDir, ".ssh")
+	if err := os.MkdirAll(hostKeyDir, 0700); err != nil {
+		log.Fatalf("host key dir: %v", err)
 	}
 
+	// abuse firewall
+	idleTimeout := 2 * time.Hour
+	if d, err := time.ParseDuration(cfg.Server.IdleTimeout); err == nil {
+		idleTimeout = d
+	}
+	g := guard.New(guard.Policy{
+		MaxConns:       cfg.Security.MaxConns,
+		MaxConnsPerIP:  cfg.Security.MaxConnsPerIP,
+		NewConnsPerMin: cfg.Security.NewConnsPerMin,
+		MaxAuthFails:   cfg.Security.MaxAuthFails,
+		BanDuration:    time.Duration(cfg.Security.BanMinutes) * time.Minute,
+		ProbeBan:       time.Duration(cfg.Security.ProbeBanMinutes) * time.Minute,
+		DenyCIDRs:      cfg.Security.DenyCIDRs,
+		AllowCIDRs:     cfg.Security.AllowCIDRs,
+	}, st)
+
 	catalog := jukebox.NewCatalog()
-	log.Printf("Tavern Radio: %d tracks loaded", catalog.TrackCount())
+	log.Printf("Ryolink Radio: %d tracks loaded", catalog.TrackCount())
 	jukeboxEngine := jukebox.NewEngineWithCatalog(catalog)
 	jukeboxEngine.SetOnlineCount(h.OnlineCount)
 	streamer := jukebox.NewStreamer()
@@ -514,52 +592,87 @@ func runServer() {
 	sudokuGame := sudoku.NewGame("evil")
 	log.Printf("Sudoku: evil puzzle ready (%d clues)", sudokuGame.Filled())
 
-	// Web audio streaming
-	if hasFlag("--web-audio") {
-		ws := webstream.New(streamer, jukeboxEngine)
-		go ws.ListenAndServe(":8090")
+	// One web surface on server.web_bind:web_port — the store landing page
+	// (when enabled), the shop JSON + download endpoints, and the radio
+	// stream. It defaults to loopback; Caddy publishes it. The storefront
+	// registers "/" only when enabled, so a chat-only instance answers
+	// /stream and /now-playing exactly as before.
+	webMux := http.NewServeMux()
+	var shopInst *shop.Shop
+	if cfg.Store.Enabled {
+		publicBase := cfg.Store.PublicURL
+		if publicBase == "" {
+			publicBase = "http://" + cfg.Ryolink.Domain + ":" + strconv.Itoa(cfg.Server.WebPort)
+		}
+		sh, err := shop.New(cfg.Store, dataDir, publicBase, st.DB())
+		if err != nil {
+			log.Printf("shop: disabled (%v)", err)
+		} else {
+			shopInst = sh
+			sh.RegisterRoutes(webMux, true)
+			log.Printf("shop: %d items, landing on :%d", len(sh.Items()), cfg.Server.WebPort)
+		}
 	}
+	ws := webstream.New(streamer, jukeboxEngine)
+	ws.RegisterRoutes(webMux)
+	if shopInst == nil {
+		// store disabled: the web port still answers with a minimal ryoku page
+		webMux.HandleFunc("/", func(w2 http.ResponseWriter, r2 *http.Request) {
+			if r2.URL.Path != "/" {
+				http.NotFound(w2, r2)
+				return
+			}
+			w2.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprintf(w2, "<!doctype html><meta charset=utf-8><title>%s</title>"+
+				"<body style=\"background:#16161e;color:#c0caf5;font:15px ui-monospace,monospace;margin:48px\">"+
+				"<pre style=\"background:linear-gradient(90deg,#F25623,#FFD24A);-webkit-background-clip:text;color:transparent;font-weight:700\""+
+				">█▀▄ █ █ █▀█ █▄▀ █ █\n█▀▄ ▀█▀ █ █ █▀▄ █ █\n▀ ▀ ░█░ ▀▀▀ ▀ ▀ ▀▀▀</pre>"+
+				"<p>the store is being stocked. meanwhile: <code style=\"color:#9ece6a\">ssh %s</code></p>"+
+				"</body>", template.HTMLEscapeString(cfg.Ryolink.Domain), template.HTMLEscapeString(cfg.Ryolink.Domain))
+		})
+	}
+	webAddr := net.JoinHostPort(cfg.Server.WebBind, strconv.Itoa(cfg.Server.WebPort))
+	go func() {
+		srv := &http.Server{Addr: webAddr, Handler: webMux, ReadHeaderTimeout: 10 * time.Second}
+		log.Printf("web: %s (store=%v radio=on)", webAddr, shopInst != nil)
+		if err := srv.ListenAndServe(); err != nil {
+			log.Printf("web: %v", err)
+		}
+	}()
 
 	pollStore := poll.NewStore()
 
-	// bartender
+	// bartender (persona ships embedded; bartender/soul.md overrides)
 	var bt *bartender.Bartender
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey != "" {
-		soulRaw, err := os.ReadFile(resolvedPath("bartender/soul.md"))
-		if err != nil {
-			log.Printf("bartender: soul.md not found, trying soul.md.example")
-			soulRaw, err = os.ReadFile(resolvedPath("bartender/soul.md.example"))
-			if err != nil {
-				log.Printf("bartender: no soul file found, using default")
-				soulRaw = []byte("You are a gruff bartender in a terminal tavern. Keep replies to 1-2 sentences.")
-			}
-		}
-
-		soul := string(soulRaw)
-		// Render template variables if present
+	if apiKey := cfg.Secret("OPENAI_API_KEY", cfg.API.OpenAIKey); apiKey != "" {
+		soul := bartender.LoadSoul(dataDir)
 		if tmpl, tmplErr := template.New("soul").Parse(soul); tmplErr == nil {
 			var buf bytes.Buffer
 			data := map[string]string{
-				"TavernName": cfg.Tavern.Name,
-				"OwnerName":  cfg.Owner.Name,
-				"Domain":     cfg.Tavern.Domain,
+				"RyolinkName": cfg.Ryolink.Name,
+				"OwnerName":   cfg.Owner.Name,
+				"Domain":      cfg.Ryolink.Domain,
 			}
 			if err := tmpl.Execute(&buf, data); err == nil {
 				soul = buf.String()
 			}
 		}
-
 		bt = bartender.New(apiKey, soul, st)
 		log.Println("bartender: enabled")
 	} else {
 		log.Println("bartender: disabled (no OPENAI_API_KEY)")
 	}
 
-	port := getPort()
-	// gif client
+	port := cfg.Server.Port
+	if env := os.Getenv("RYOLINK_PORT"); env != "" {
+		if n, err := strconv.Atoi(env); err == nil {
+			port = n
+		}
+	}
+
+	// gif search
 	var gifClient *gif.KlipyClient
-	if klipyKey := os.Getenv("KLIPY_API_KEY"); klipyKey != "" {
+	if klipyKey := cfg.Secret("KLIPY_API_KEY", cfg.API.KlipyKey); klipyKey != "" {
 		gifClient = gif.NewKlipyClient(klipyKey)
 		log.Println("gif search: enabled")
 	} else {
@@ -568,7 +681,10 @@ func runServer() {
 
 	// Reddit feed client (always created — subreddits can be added via --feed-add)
 	// OAuth credentials avoid 403 blocks on cloud server IPs
-	redditClient := reddit.NewClient(os.Getenv("REDDIT_CLIENT_ID"), os.Getenv("REDDIT_CLIENT_SECRET"))
+	redditClient := reddit.NewClient(
+		cfg.Secret("REDDIT_CLIENT_ID", cfg.API.RedditClientID),
+		cfg.Secret("REDDIT_CLIENT_SECRET", cfg.API.RedditSecret),
+	)
 	feedSubs := st.FeedSubreddits()
 	if len(feedSubs) > 0 {
 		log.Printf("reddit feed: enabled (%d subreddits)", len(feedSubs))
@@ -577,24 +693,18 @@ func runServer() {
 		log.Println("reddit feed: no subreddits configured (use --feed-add)")
 	}
 
-	// Mystery engine (optional — loads if mysteries/case01 exists)
+	// Mystery engine: embedded case always loads; a mysteries/case01 dir in
+	// the data dir overrides it.
 	var mysteryEngine *mystery.Engine
-	caseDir := resolvedPath("mysteries/case01")
-	if _, statErr := os.Stat(caseDir); statErr == nil {
-		me, loadErr := mystery.New(caseDir)
-		if loadErr != nil {
-			log.Printf("mystery: failed to load: %v", loadErr)
-		} else {
-			mysteryEngine = me
-		}
+	if me, loadErr := mystery.New(filepath.Join(dataDir, "mysteries", "case01")); loadErr != nil {
+		log.Printf("mystery: %v", loadErr)
 	} else {
-		log.Println("mystery: no case data found (skipping)")
+		mysteryEngine = me
 	}
 
 	// web search
-	var searcher *search.Searcher
-	exaKey := os.Getenv("EXA_API_KEY")
-	searcher = search.New(exaKey)
+	exaKey := cfg.Secret("EXA_API_KEY", cfg.API.ExaKey)
+	searcher := search.New(exaKey)
 	if exaKey != "" {
 		log.Println("web search: enabled (Exa + DuckDuckGo fallback)")
 	} else {
@@ -602,28 +712,34 @@ func runServer() {
 	}
 
 	srv, err := server.New(server.Config{
-		Host:             "0.0.0.0",
+		Host:             cfg.Server.Host,
 		Port:             port,
-		HostKeyPath:      ".ssh/id_ed25519",
+		HostKeyPath:      filepath.Join(hostKeyDir, "id_ed25519"),
 		Store:            st,
 		Hub:              h,
 		JukeboxEngine:    jukeboxEngine,
 		SudokuGame:       sudokuGame,
 		PollStore:        pollStore,
 		Bartender:        bt,
-		TavernName:       cfg.Tavern.Name,
-		TavernDomain:     cfg.Tavern.Domain,
-		Tagline:          cfg.Tavern.Tagline,
+		RyolinkName:      cfg.Ryolink.Name,
+		RyolinkDomain:    cfg.Ryolink.Domain,
+		Tagline:          cfg.Ryolink.Tagline,
 		OwnerName:        cfg.Owner.Name,
 		OwnerFingerprint: cfg.Owner.Fingerprint,
 		FirstRoom:        cfg.FirstRoom(),
+		BarRoom:          cfg.BarRoom(),
+		RoomOrder:        cfg.RoomNames(),
+		MouseDefault:     cfg.Bind.Mouse != "off",
 		RoomTypes:        cfg.RoomTypeMap(),
+		Shop:             shopInst,
 		GifClient:        gifClient,
 		WargameStore:     wargame.New(st.DB()),
 		Searcher:         searcher,
 		DMStore:          initDMStore(st),
 		RedditClient:     redditClient,
 		MysteryEngine:    mysteryEngine,
+		Guard:            g,
+		IdleTimeout:      idleTimeout,
 	})
 	if err != nil {
 		log.Fatalf("server: %v", err)
@@ -648,6 +764,7 @@ func runServer() {
 	go watchBanFile(h)
 	go watchPurgeFile(h)
 	go watchBartenderToggle(bt)
+	go watchDenyFile(g)
 
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
@@ -658,22 +775,38 @@ func runServer() {
 		}
 	}()
 
-	log.Printf("%s is open. ssh localhost -p %d", cfg.Tavern.Domain, port)
+	log.Printf("%s is open. ssh %s -p %d", cfg.Ryolink.Domain, cfg.Ryolink.Domain, port)
 
 	<-done
-	log.Println("tavern closing...")
+	log.Println("ryolink closing...")
 	cancel()
 	h.BroadcastAll(session.Msg{
 		Type: session.MsgSystem,
-		Text: "the tavern is closing...",
+		Text: "ryolink is closing...",
 	})
 	srv.Shutdown(5 * time.Second)
 	log.Println("goodbye.")
 }
 
+// watchDenyFile picks up live --deny / --undeny signals and re-syncs the
+// guard's in-memory ban map from the persistent store.
+func watchDenyFile(g *guard.Guard) {
+	for {
+		time.Sleep(1 * time.Second)
+		data, err := os.ReadFile(dataPath(denyFile))
+		if err != nil {
+			continue
+		}
+		os.Remove(dataPath(denyFile))
+		_ = strings.TrimSpace(string(data)) // which cidr changed; a reload is cheap
+		g.Reload()
+		log.Printf("security: network bans reloaded")
+	}
+}
+
 func runUpdate() error {
 	if os.Geteuid() == 0 {
-		return fmt.Errorf("run tavrn --update as the tavrn user, not root")
+		return fmt.Errorf("run ryolink --update as ryolink user, not root")
 	}
 
 	repoDir, err := executableRepoDir()
@@ -696,14 +829,20 @@ func runUpdate() error {
 		return err
 	}
 
-	fmt.Println("Building tavrn...")
-	if err := runCommand(repoDir, env, "go", "build", "-o", "tavrn", "./cmd/tavrn-admin"); err != nil {
+	fmt.Println("Building ryolink...")
+	if err := runCommand(repoDir, env, "go", "build", "-o", "ryolink.new", "./cmd/ryolink"); err != nil {
 		return err
 	}
+	// Swap atomically; the running service keeps its old inode until restart.
+	if err := os.Rename(filepath.Join(repoDir, "ryolink.new"), filepath.Join(repoDir, "ryolink")); err != nil {
+		return fmt.Errorf("swap binary: %w", err)
+	}
 
-	fmt.Println("Finalizing update...")
-	if err := runCommand(repoDir, env, "sudo", "/usr/local/sbin/tavrn-finalize-update"); err != nil {
-		return err
+	fmt.Println("Restarting service...")
+	if err := runCommand(repoDir, env, "systemctl", "restart", "ryolink"); err != nil {
+		if err2 := runCommand(repoDir, env, "sudo", "systemctl", "restart", "ryolink"); err2 != nil {
+			fmt.Println("Could not restart automatically — run: sudo systemctl restart ryolink")
+		}
 	}
 
 	rev, err := commandOutput(repoDir, env, "git", "rev-parse", "--short", "HEAD")
@@ -715,28 +854,81 @@ func runUpdate() error {
 	return nil
 }
 
-// resolvedPath returns the path to a file, checking the working directory
-// first, then next to the executable. For new files that don't exist yet,
-// it prefers cwd if tavern.yaml is there (indicates correct working dir).
-func resolvedPath(name string) string {
-	// If file exists in cwd, use that
-	if _, err := os.Stat(name); err == nil {
+// dataDir is the resolved directory holding every mutable file: db, host
+// keys, logs, and the admin signal files. Set by loadConfig (or defaulted
+// for admin verbs that run without a full load).
+var dataDir string
+
+// dataPath resolves a runtime file name inside the data dir.
+func dataPath(name string) string {
+	if dataDir == "" {
 		return name
 	}
-	// If cwd looks like the repo dir (has tavern.yaml), use cwd for new files too
-	if _, err := os.Stat("tavern.yaml"); err == nil {
-		return name
+	return filepath.Join(dataDir, name)
+}
+
+// findConfig locates ryolink.yaml, in order:
+// $RYOLINK_CONFIG, ./ryolink.yaml (repo/dev mode), /etc/ryolink/ryolink.yaml
+// (installed server — what the service reads), ~/.config/ryolink/ryolink.yaml
+// (per-user mode). The /etc entry means admin verbs find the instance
+// anywhere on the box, not just from a directory holding the config.
+func findConfig() string {
+	if p := os.Getenv("RYOLINK_CONFIG"); p != "" {
+		return p
 	}
-	// Fall back to next to the executable
-	repoDir, err := executableRepoDir()
+	if _, err := os.Stat("ryolink.yaml"); err == nil {
+		abs, aerr := filepath.Abs("ryolink.yaml")
+		if aerr == nil {
+			return abs
+		}
+		return "ryolink.yaml"
+	}
+	if _, err := os.Stat("/etc/ryolink/ryolink.yaml"); err == nil {
+		return "/etc/ryolink/ryolink.yaml"
+	}
+	if cfgDir, err := os.UserConfigDir(); err == nil {
+		p := filepath.Join(cfgDir, "ryolink", "ryolink.yaml")
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+// resolveDataDir sets dataDir from the config (or its fallbacks) and makes
+// sure it exists. Admin verbs call this before touching any file.
+func resolveDataDir(cfg *config.Config, configPath string) {
+	switch {
+	case cfg != nil && cfg.Server.DataDir != "":
+		dataDir = cfg.Server.DataDir
+	case configPath != "":
+		dataDir = filepath.Dir(configPath)
+	default:
+		dataDir = "."
+	}
+	os.MkdirAll(dataDir, 0700)
+}
+
+// loadConfigForAdmin loads ryolink.yaml if present and resolves the data dir.
+// Missing/invalid config is not fatal for admin verbs: they fall back to the
+// config dir / cwd, matching the pre-rework behaviour.
+func loadConfigForAdmin() *config.Config {
+	p := findConfig()
+	if p == "" {
+		resolveDataDir(nil, "")
+		return nil
+	}
+	cfg, err := config.Load(p)
 	if err != nil {
-		return name
+		resolveDataDir(nil, p)
+		return nil
 	}
-	return filepath.Join(repoDir, name)
+	resolveDataDir(cfg, p)
+	return cfg
 }
 
 func resolvedDBPath() string {
-	return resolvedPath("tavrn.db")
+	return dataPath("ryolink.db")
 }
 
 func executableRepoDir() (string, error) {
@@ -874,7 +1066,7 @@ func startPurgeScheduler(st *store.Store, h *hub.Hub, ps *poll.Store, me *myster
 		log.Println("Weekly purge starting...")
 		h.BroadcastAll(session.Msg{
 			Type: session.MsgSystem,
-			Text: "The tavern has been swept clean.",
+			Text: "The Ryolink has been swept clean.",
 		})
 		st.PurgeAll()
 		ps.Clear()
@@ -889,7 +1081,7 @@ func watchBannerFile(st *store.Store, h *hub.Hub) {
 	for {
 		time.Sleep(1 * time.Second)
 
-		data, err := os.ReadFile(bannerFile)
+		data, err := os.ReadFile(dataPath(bannerFile))
 		if err != nil {
 			continue
 		}
@@ -899,7 +1091,7 @@ func watchBannerFile(st *store.Store, h *hub.Hub) {
 			continue
 		}
 
-		os.Remove(bannerFile)
+		os.Remove(dataPath(bannerFile))
 
 		log.Printf("Broadcasting banner: %s", text)
 		st.SetBanner(text)
@@ -914,7 +1106,7 @@ func watchAddRoomFile(st *store.Store, h *hub.Hub) {
 	for {
 		time.Sleep(1 * time.Second)
 
-		data, err := os.ReadFile(addRoomFile)
+		data, err := os.ReadFile(dataPath(addRoomFile))
 		if err != nil {
 			continue
 		}
@@ -924,7 +1116,7 @@ func watchAddRoomFile(st *store.Store, h *hub.Hub) {
 			continue
 		}
 
-		os.Remove(addRoomFile)
+		os.Remove(dataPath(addRoomFile))
 
 		if st.IsRoom(name) {
 			log.Printf("Room #%s already exists", name)
@@ -948,13 +1140,13 @@ func watchRenameRoomFile(st *store.Store, h *hub.Hub) {
 	for {
 		time.Sleep(1 * time.Second)
 
-		data, err := os.ReadFile(renameRoomFile)
+		data, err := os.ReadFile(dataPath(renameRoomFile))
 		if err != nil {
 			continue
 		}
 
 		payload := strings.TrimSpace(string(data))
-		os.Remove(renameRoomFile)
+		os.Remove(dataPath(renameRoomFile))
 
 		parts := strings.SplitN(payload, ":", 2)
 		if len(parts) != 2 {
@@ -991,7 +1183,7 @@ func watchRemoveRoomFile(st *store.Store, h *hub.Hub) {
 	for {
 		time.Sleep(1 * time.Second)
 
-		data, err := os.ReadFile(removeRoomFile)
+		data, err := os.ReadFile(dataPath(removeRoomFile))
 		if err != nil {
 			continue
 		}
@@ -1000,7 +1192,7 @@ func watchRemoveRoomFile(st *store.Store, h *hub.Hub) {
 		if name == "" {
 			continue
 		}
-		os.Remove(removeRoomFile)
+		os.Remove(dataPath(removeRoomFile))
 
 		if !st.IsRoom(name) {
 			log.Printf("Room #%s does not exist", name)
@@ -1024,7 +1216,7 @@ func watchBanFile(h *hub.Hub) {
 	for {
 		time.Sleep(1 * time.Second)
 
-		data, err := os.ReadFile(banFile)
+		data, err := os.ReadFile(dataPath(banFile))
 		if err != nil {
 			continue
 		}
@@ -1033,7 +1225,7 @@ func watchBanFile(h *hub.Hub) {
 		if fp == "" {
 			continue
 		}
-		os.Remove(banFile)
+		os.Remove(dataPath(banFile))
 
 		if h.Kick(fp) {
 			log.Printf("Kicked banned user: %s", fp[:16]+"...")
@@ -1045,11 +1237,11 @@ func watchPurgeFile(h *hub.Hub) {
 	for {
 		time.Sleep(1 * time.Second)
 
-		if _, err := os.ReadFile(purgeFile); err != nil {
+		if _, err := os.ReadFile(dataPath(purgeFile)); err != nil {
 			continue
 		}
 
-		os.Remove(purgeFile)
+		os.Remove(dataPath(purgeFile))
 
 		log.Println("Manual purge signal received, broadcasting to clients")
 		h.BroadcastAll(session.Msg{
@@ -1062,12 +1254,12 @@ func watchBartenderToggle(bt *bartender.Bartender) {
 	for {
 		time.Sleep(1 * time.Second)
 
-		data, err := os.ReadFile(bartenderToggleFile)
+		data, err := os.ReadFile(dataPath(bartenderToggleFile))
 		if err != nil {
 			continue
 		}
 
-		os.Remove(bartenderToggleFile)
+		os.Remove(dataPath(bartenderToggleFile))
 
 		if bt == nil {
 			log.Println("bartender: toggle ignored (not initialized)")

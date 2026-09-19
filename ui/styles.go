@@ -1,46 +1,73 @@
 package ui
 
 import (
+	"fmt"
 	"image/color"
 
 	"charm.land/lipgloss/v2"
 )
 
-// Cantina palette — ANSI 256 colors.
+// Ryoku palette — the Tokyo-Night-derived visual language shared with the
+// Ryoku installers (ryoku-shell-installer/style.go): same background, text
+// and brand hues, so ryolink reads as part of the same product.
 var (
-	ColorBackground = lipgloss.Color("235")
-	ColorDarkBg     = lipgloss.Color("233")
-	ColorPanelBg    = lipgloss.Color("234")
-	ColorSand       = lipgloss.Color("180")
-	ColorDim        = lipgloss.Color("243")
-	ColorDimmer     = lipgloss.Color("239")
-	ColorBorder     = lipgloss.Color("94")
-	ColorHighlight  = lipgloss.Color("179")
-	ColorAmber      = lipgloss.Color("172")
-	ColorTitle      = lipgloss.Color("180")
-	ColorCommand    = lipgloss.Color("179")
-	ColorDesc       = lipgloss.Color("243")
-	ColorAccent     = lipgloss.Color("137")
-	ColorGreen      = lipgloss.Color("108")
-	ColorTyping     = lipgloss.Color("109")
-	ColorMention    = lipgloss.Color("179") // gold highlight for @mentions
+	ColorBackground = lipgloss.Color("#16161e") // sumi ink
+	ColorDarkBg     = lipgloss.Color("#101017")
+	ColorPanelBg    = lipgloss.Color("#1a1b26")
+	ColorSand       = lipgloss.Color("#c0caf5") // sakura text
+	ColorDim        = lipgloss.Color("#7079b3")
+	ColorDimmer     = lipgloss.Color("#3b4261")
+	ColorBorder     = lipgloss.Color("#2a2b3d")
+	ColorHighlight  = lipgloss.Color("#FFD24A") // gold (gradient B stop)
+	ColorAmber      = lipgloss.Color("#F25623") // vermilion (gradient A stop)
+	ColorTitle      = lipgloss.Color("#c0caf5")
+	ColorCommand    = lipgloss.Color("#7aa2f7") // ai-blue
+	ColorDesc       = lipgloss.Color("#7079b3")
+	ColorAccent     = lipgloss.Color("#F25623") // torii vermilion
+	ColorGreen      = lipgloss.Color("#9ece6a") // matcha
+	ColorTyping     = lipgloss.Color("#7dcfff")
+	ColorMention    = lipgloss.Color("#e0af68") // kincha gold for @mentions
+	ColorIndigo     = lipgloss.Color("#7aa2f7")
 
-	// 12 muted cantina tones for nicknames
+	// 12 tones for nicknames: the ryoku hue family — ink blues, sakura,
+	// matcha, kincha, fuji violet — muted enough to sit on sumi ink.
 	NickColors = []color.Color{
-		lipgloss.Color("174"), // dusty rose
-		lipgloss.Color("109"), // faded teal
-		lipgloss.Color("137"), // aged copper
-		lipgloss.Color("138"), // soft clay
-		lipgloss.Color("108"), // pale sage
-		lipgloss.Color("179"), // weathered gold
-		lipgloss.Color("140"), // dim lavender
-		lipgloss.Color("67"),  // smoky blue
-		lipgloss.Color("131"), // muted coral
-		lipgloss.Color("144"), // warm stone
-		lipgloss.Color("136"), // quiet amber
-		lipgloss.Color("97"),  // dusk violet
+		lipgloss.Color("#7aa2f7"), // ai blue
+		lipgloss.Color("#9ece6a"), // matcha
+		lipgloss.Color("#e0af68"), // kincha gold
+		lipgloss.Color("#f7768e"), // sakura pink
+		lipgloss.Color("#7dcfff"), // sky ice
+		lipgloss.Color("#bb9af7"), // fuji violet
+		lipgloss.Color("#F25623"), // torii vermilion
+		lipgloss.Color("#73acaa"), // seigaiha teal
+		lipgloss.Color("#c0caf5"), // pale indigo
+		lipgloss.Color("#a9b1d6"), // tsukumo grey-blue
+		lipgloss.Color("#ff9e64"), // aki orange
+		lipgloss.Color("#cfc9c2"), // shirakusa sand
 	}
 )
+
+// Brand gradient stops, verbatim from the Ryoku installers (vermilion→gold).
+var BrandGradA = [3]int{0xF2, 0x56, 0x23}
+var BrandGradB = [3]int{0xFF, 0xD2, 0x4A}
+
+// BrandColor lerps the ryoku brand gradient at t∈[0,1].
+func BrandColor(t float64) color.Color {
+	if t < 0 {
+		t = 0
+	}
+	if t > 1 {
+		t = 1
+	}
+	r := BrandGradA[0] + int(float64(BrandGradB[0]-BrandGradA[0])*t)
+	g := BrandGradA[1] + int(float64(BrandGradB[1]-BrandGradA[1])*t)
+	b := BrandGradA[2] + int(float64(BrandGradB[2]-BrandGradA[2])*t)
+	return lipgloss.Color(hexColor(r, g, b))
+}
+
+func hexColor(r, g, b int) string {
+	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
+}
 
 var (
 	TopBarBorderStyle = lipgloss.NewStyle().

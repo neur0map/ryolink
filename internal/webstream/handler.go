@@ -2,11 +2,10 @@ package webstream
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"time"
 
-	"tavrn.sh/internal/jukebox"
+	"ryolink/internal/jukebox"
 )
 
 type Handler struct {
@@ -118,16 +117,9 @@ func (h *Handler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ServeMux returns a configured HTTP mux.
-func (h *Handler) ServeMux() *http.ServeMux {
-	mux := http.NewServeMux()
+// RegisterRoutes mounts the radio endpoints onto an existing mux. It never
+// claims "/" — the storefront owns the landing page on the shared listener.
+func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/stream", h.Stream)
 	mux.HandleFunc("/now-playing", h.NowPlaying)
-	return mux
-}
-
-// ListenAndServe starts the web audio HTTP server.
-func (h *Handler) ListenAndServe(addr string) error {
-	log.Printf("Web audio streaming on %s", addr)
-	return http.ListenAndServe(addr, h.ServeMux())
 }

@@ -9,7 +9,7 @@ import (
 func writeConfig(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "tavern.yaml")
+	path := filepath.Join(dir, "ryolink.yaml")
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -18,8 +18,8 @@ func writeConfig(t *testing.T, content string) string {
 
 func TestLoadValid(t *testing.T) {
 	path := writeConfig(t, `
-tavern:
-  name: "Test Tavern"
+ryolink:
+  name: "Test Ryolink"
   domain: "test.sh"
   tagline: "a test place"
 
@@ -40,14 +40,14 @@ rooms:
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
-	if cfg.Tavern.Name != "Test Tavern" {
-		t.Errorf("name = %q", cfg.Tavern.Name)
+	if cfg.Ryolink.Name != "Test Ryolink" {
+		t.Errorf("name = %q", cfg.Ryolink.Name)
 	}
-	if cfg.Tavern.Domain != "test.sh" {
-		t.Errorf("domain = %q", cfg.Tavern.Domain)
+	if cfg.Ryolink.Domain != "test.sh" {
+		t.Errorf("domain = %q", cfg.Ryolink.Domain)
 	}
-	if cfg.Tavern.Tagline != "a test place" {
-		t.Errorf("tagline = %q", cfg.Tavern.Tagline)
+	if cfg.Ryolink.Tagline != "a test place" {
+		t.Errorf("tagline = %q", cfg.Ryolink.Tagline)
 	}
 	if cfg.Owner.Name != "testowner" {
 		t.Errorf("owner = %q", cfg.Owner.Name)
@@ -64,7 +64,7 @@ rooms:
 }
 
 func TestLoadMissingFile(t *testing.T) {
-	_, err := Load("/nonexistent/tavern.yaml")
+	_, err := Load("/nonexistent/ryolink.yaml")
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
@@ -72,7 +72,7 @@ func TestLoadMissingFile(t *testing.T) {
 
 func TestLoadMissingName(t *testing.T) {
 	path := writeConfig(t, `
-tavern:
+ryolink:
   domain: "test.sh"
 owner:
   name: "testowner"
@@ -83,13 +83,13 @@ rooms:
 `)
 	_, err := Load(path)
 	if err == nil {
-		t.Fatal("expected error for missing tavern.name")
+		t.Fatal("expected error for missing ryolink.name")
 	}
 }
 
 func TestLoadMissingOwnerFingerprint(t *testing.T) {
 	path := writeConfig(t, `
-tavern:
+ryolink:
   name: "Test"
   domain: "test.sh"
 owner:
@@ -106,7 +106,7 @@ rooms:
 
 func TestLoadNoRooms(t *testing.T) {
 	path := writeConfig(t, `
-tavern:
+ryolink:
   name: "Test"
   domain: "test.sh"
 owner:
@@ -122,7 +122,7 @@ rooms: []
 
 func TestLoadInvalidRoomType(t *testing.T) {
 	path := writeConfig(t, `
-tavern:
+ryolink:
   name: "Test"
   domain: "test.sh"
 owner:
@@ -140,7 +140,7 @@ rooms:
 
 func TestRoomNames(t *testing.T) {
 	path := writeConfig(t, `
-tavern:
+ryolink:
   name: "Test"
   domain: "test.sh"
 owner:
@@ -166,7 +166,7 @@ rooms:
 
 func TestFirstRoom(t *testing.T) {
 	path := writeConfig(t, `
-tavern:
+ryolink:
   name: "Test"
   domain: "test.sh"
 owner:
@@ -189,7 +189,7 @@ rooms:
 
 func TestRoomIsType(t *testing.T) {
 	path := writeConfig(t, `
-tavern:
+ryolink:
   name: "Test"
   domain: "test.sh"
 owner:
@@ -223,7 +223,7 @@ rooms:
 
 func TestRoomTypeMap(t *testing.T) {
 	path := writeConfig(t, `
-tavern:
+ryolink:
   name: "Test"
   domain: "test.sh"
 owner:

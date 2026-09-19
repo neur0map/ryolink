@@ -47,7 +47,7 @@ func (c *KlipyClient) Search(query string) ([]KlipyResult, error) {
 	params := url.Values{}
 	params.Set("q", query)
 	params.Set("per_page", fmt.Sprintf("%d", defaultPerPage))
-	params.Set("customer_id", "tavrn")
+	params.Set("customer_id", "ryolink")
 	params.Set("content_filter", "high")
 
 	resp, err := c.http.Get(endpoint + "?" + params.Encode())

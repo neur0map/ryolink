@@ -1,6 +1,8 @@
 package identity
 
 import (
+	"encoding/base64"
+	"encoding/hex"
 	"strings"
 	"testing"
 )
@@ -69,6 +71,19 @@ func TestIsOwnerFingerprint(t *testing.T) {
 	}
 	if IsOwnerFingerprint("", "abc123") {
 		t.Error("empty fingerprint should not be owner")
+	}
+}
+
+func TestIsOwnerFingerprintSHA256Form(t *testing.T) {
+	// same digest, two encodings: hex (server) vs SHA256:base64url (ssh-keygen)
+	raw := []byte("01234567890123456789012345678901") // 32 bytes, like sha256
+	hexFp := hex.EncodeToString(raw)
+	owner := "SHA256:" + base64.RawURLEncoding.EncodeToString(raw)
+	if !IsOwnerFingerprint(hexFp, owner) {
+		t.Error("hex fingerprint should match SHA256: base64url form")
+	}
+	if IsOwnerFingerprint(hexFp, "SHA256:"+base64.RawURLEncoding.EncodeToString([]byte("different digest entirely 32byte"))) {
+		t.Error("different digests must not match")
 	}
 }
 

@@ -1,22 +1,22 @@
 services:
-  tavrn:
+  ryolink:
     build: .
     ports:
-      - "2222:2222"
-      - "8090:8090"
+      - "2222:2222"   # the chatroom + store browser (ssh)
+      - "8090:8090"   # web surface: landing page, /api/items, /files, radio
+                      # (publish via Caddy/TLS in front instead of exposing raw)
     volumes:
-      - ./tavern.yaml:/app/tavern.yaml:ro
-      - ./bartender:/app/bartender:ro
-      - ./catalogs:/app/catalogs:ro
-      - tavrn-data:/app/data
-      - tavrn-ssh:/app/.ssh
+      # one mounted config; everything mutable lives in the /data volume
+      - ./ryolink.yaml:/data/ryolink.yaml:ro
+      - ryolink-data:/data/store   # staged shop artifacts
     environment:
-      - TAVRN_PORT=2222
+      - RYOLINK_CONFIG=/data/ryolink.yaml
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - KLIPY_API_KEY=${KLIPY_API_KEY:-}
       - EXA_API_KEY=${EXA_API_KEY:-}
+      - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID:-}
+      - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET:-}
     restart: unless-stopped
 
 volumes:
-  tavrn-data:
-  tavrn-ssh:
+  ryolink-data:

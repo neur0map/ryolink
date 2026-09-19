@@ -9,8 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"tavrn.sh/internal/chat"
-	"tavrn.sh/internal/sudoku"
+	"ryolink/internal/chat"
+	"ryolink/internal/sudoku"
 )
 
 const (

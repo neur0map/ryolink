@@ -8,7 +8,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"tavrn.sh/internal/reddit"
+	"ryolink/internal/reddit"
 )
 
 type feedState int

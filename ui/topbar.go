@@ -8,7 +8,7 @@ import (
 )
 
 type TopBar struct {
-	TavernName   string
+	RyolinkName  string
 	Room         string
 	OnlineCount  int
 	WeeklyCount  int
@@ -21,8 +21,8 @@ func (t TopBar) View() string {
 		return ""
 	}
 
-	// Line 1: Diagonal fill with tavern name embedded
-	label := fmt.Sprintf(" %s ", t.TavernName)
+	// Line 1: Diagonal fill with ryolink name embedded
+	label := fmt.Sprintf(" %s ", t.RyolinkName)
 	fillTotal := t.Width - len(label)
 	leftN := fillTotal / 2
 	rightN := fillTotal - leftN

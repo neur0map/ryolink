@@ -3,37 +3,81 @@ package ui
 import (
 	"fmt"
 	"image/color"
-	"math/rand"
+	"math/rand/v2"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"tavrn.sh/internal/version"
+	"ryolink/internal/version"
 )
 
-const tavernArt = "" +
-	"        .  *  .  *  .        \n" +
-	"    *       )    (       *   \n" +
-	"        .  ) )  ( (  .       \n" +
-	"      _____|______|_____     \n" +
-	"     |    T A V R N    |     \n" +
-	"     |  ~~~~~~~~~~~~~~  |    \n" +
-	"     |    *        *    |    \n" +
-	"     |__________________|    \n" +
-	"     |    |  OPEN  |    |    \n" +
-	"     |    |        |    |    \n" +
-	"     | [] |________| [] |    \n" +
-	"     |____|________|____|    \n" +
-	"     |__|__|__|__|__|__|     "
+// The RYOKU wordmark, verbatim from the Ryoku ISO installer
+// (installation/tui bigLetters): five block letters, five rows.
+var bigLetters = [][]string{
+	{"████ ", "█  █ ", "████ ", "█ █  ", "█  █ "},
+	{"█   █", " █ █ ", "  █  ", "  █  ", "  █  "},
+	{"█████", "█   █", "█   █", "█   █", "█████"},
+	{"█  █ ", "█ █  ", "██   ", "█ █  ", "█  █ "},
+	{"█   █", "█   █", "█   █", "█   █", "█████"},
+}
 
-var artGradientPairs = [][2]color.Color{
-	{lipgloss.Color("137"), lipgloss.Color("94")},
-	{lipgloss.Color("172"), lipgloss.Color("137")},
-	{lipgloss.Color("179"), lipgloss.Color("172")},
-	{lipgloss.Color("180"), lipgloss.Color("179")},
-	{lipgloss.Color("179"), lipgloss.Color("172")},
-	{lipgloss.Color("172"), lipgloss.Color("137")},
+func bigRows(scale int) []string {
+	rows := make([]string, 5)
+	for r := range 5 {
+		parts := make([]string, len(bigLetters))
+		for i := range bigLetters {
+			parts[i] = bigLetters[i][r]
+		}
+		row := strings.Join(parts, " ")
+		if scale > 1 {
+			var d strings.Builder
+			for _, ch := range row {
+				d.WriteString(strings.Repeat(string(ch), scale))
+			}
+			row = d.String()
+		}
+		rows[r] = row
+	}
+	if scale <= 1 {
+		return rows
+	}
+	// double the rows too: 2x2 scale per cell
+	out := make([]string, 0, len(rows)*scale)
+	for _, r := range rows {
+		for range scale {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// revealBanner renders the wordmark mid-reveal: columns up to the reveal cut
+// shimmer along the ryoku brand gradient (vermilion→gold, phase-shifted),
+// the rest waits as dim ink. This is the installer's boot animation, ported.
+func revealBanner(reveal float64, phase, scale int) []string {
+	rows := bigRows(scale)
+	total := lipgloss.Width(rows[0])
+	cut := int(reveal * float64(total+3))
+	dim := lipgloss.NewStyle().Foreground(ColorDimmer)
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		var b strings.Builder
+		for i, ch := range []rune(row) {
+			if ch == ' ' {
+				b.WriteString(" ")
+				continue
+			}
+			if i <= cut {
+				t := float64((i+phase)%total) / float64(total-1)
+				b.WriteString(lipgloss.NewStyle().Foreground(BrandColor(t * 2)).Render(string(ch)))
+			} else {
+				b.WriteString(dim.Render(string(ch)))
+			}
+		}
+		out = append(out, b.String())
+	}
+	return out
 }
 
 var enterPulse = []string{
@@ -43,17 +87,22 @@ var enterPulse = []string{
 	"[  >>>  ]",
 }
 
-// Bright enough to actually see against dark bg
+// revealTicks is how many splash frames the wordmark takes to light up
+// fully (at splashTickInterval ≈ 150 ms, just under 4 s), then it holds and
+// shimmers, like the installer intro.
+const revealTicks = 24
+
+// ryoku-hue sparks — the floating field behind the card.
 var sparkChars = []string{"✦", "·", "✧", "°", "∘", "⋅", "*", "•"}
 var sparkColors = []color.Color{
-	lipgloss.Color("94"),  // brown
-	lipgloss.Color("136"), // amber
-	lipgloss.Color("137"), // copper
-	lipgloss.Color("179"), // gold
-	lipgloss.Color("172"), // orange
-	lipgloss.Color("243"), // grey
-	lipgloss.Color("108"), // sage
-	lipgloss.Color("140"), // lavender
+	lipgloss.Color("#F25623"), // torii vermilion
+	lipgloss.Color("#FFD24A"), // gold
+	lipgloss.Color("#7aa2f7"), // ai blue
+	lipgloss.Color("#f7768e"), // sakura
+	lipgloss.Color("#9ece6a"), // matcha
+	lipgloss.Color("#3b4261"), // ink grey
+	lipgloss.Color("#bb9af7"), // fuji violet
+	lipgloss.Color("#7dcfff"), // ice
 }
 
 type spark struct {
@@ -67,27 +116,27 @@ type spark struct {
 type splashTickMsg time.Time
 
 type Splash struct {
-	tavernDomain string
-	tagline      string
-	nickname     string
-	fingerprint  string
-	flair        bool
-	width        int
-	height       int
-	frame        int
-	sparks       []spark
-	rng          *rand.Rand
-	inited       bool
+	ryolinkDomain string
+	tagline       string
+	nickname      string
+	fingerprint   string
+	flair         bool
+	width         int
+	height        int
+	frame         int
+	sparks        []spark
+	rng           *rand.Rand
+	inited        bool
 }
 
-func NewSplash(nickname, fingerprint string, flair bool, tavernDomain, tagline string) Splash {
+func NewSplash(nickname, fingerprint string, flair bool, ryolinkDomain, tagline string) Splash {
 	return Splash{
-		tavernDomain: tavernDomain,
-		tagline:      tagline,
-		nickname:     nickname,
-		fingerprint:  fingerprint,
-		flair:        flair,
-		rng:          rand.New(rand.NewSource(time.Now().UnixNano())),
+		ryolinkDomain: ryolinkDomain,
+		tagline:       tagline,
+		nickname:      nickname,
+		fingerprint:   fingerprint,
+		flair:         flair,
+		rng:           rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), uint64(time.Now().UnixNano()^0x5bd1e995))),
 	}
 }
 
@@ -102,12 +151,12 @@ func (s *Splash) initSparks() {
 	s.sparks = make([]spark, count)
 	for i := range s.sparks {
 		s.sparks[i] = spark{
-			x:       s.rng.Intn(s.width),
-			y:       s.rng.Intn(s.height),
-			charIdx: s.rng.Intn(len(sparkChars)),
-			colIdx:  s.rng.Intn(len(sparkColors)),
-			speed:   1 + s.rng.Intn(3),
-			tick:    s.rng.Intn(10),
+			x:       s.rng.IntN(s.width),
+			y:       s.rng.IntN(s.height),
+			charIdx: s.rng.IntN(len(sparkChars)),
+			colIdx:  s.rng.IntN(len(sparkColors)),
+			speed:   1 + s.rng.IntN(3),
+			tick:    s.rng.IntN(10),
 		}
 	}
 	s.inited = true
@@ -119,23 +168,25 @@ func (s *Splash) tickSparks() {
 		sp.tick++
 		if sp.tick%sp.speed == 0 {
 			sp.y--
-			if s.rng.Intn(2) == 0 {
-				sp.x += s.rng.Intn(3) - 1
+			if s.rng.IntN(2) == 0 {
+				sp.x += s.rng.IntN(3) - 1
 			}
-			if s.rng.Intn(5) == 0 {
-				sp.charIdx = s.rng.Intn(len(sparkChars))
-				sp.colIdx = s.rng.Intn(len(sparkColors))
+			if sp.y < 0 {
+				sp.y = s.height - 1
+				sp.x = s.rng.IntN(s.width)
 			}
-			if sp.y < 0 || sp.x < 0 || sp.x >= s.width {
-				sp.y = s.height - 1 - s.rng.Intn(4)
-				sp.x = s.rng.Intn(s.width)
+			if sp.x < 0 {
+				sp.x = 0
+			}
+			if sp.x >= s.width {
+				sp.x = s.width - 1
 			}
 		}
 	}
 }
 
 func splashTick() tea.Cmd {
-	return tea.Tick(150*time.Millisecond, func(t time.Time) tea.Msg {
+	return tea.Tick(splashTickInterval, func(t time.Time) tea.Msg {
 		return splashTickMsg(t)
 	})
 }
@@ -144,81 +195,63 @@ func (s Splash) Init() tea.Cmd {
 	return splashTick()
 }
 
-func (s Splash) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		s.width = msg.Width
-		s.height = msg.Height
-		if !s.inited {
-			s.initSparks()
-		}
-		return s, nil
+// Update keeps the original contract: keys are intercepted by App.Update;
+// the splash model only advances its own frame clock.
+func (s Splash) Update(msg tea.Msg) (Splash, tea.Cmd) {
+	switch msg.(type) {
 	case splashTickMsg:
 		s.frame++
 		s.tickSparks()
 		return s, splashTick()
-	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "enter", "y":
-			return s, func() tea.Msg { return EnterTavernMsg{} }
-		case "q", "ctrl+c":
-			return s, tea.Quit
-		}
 	}
 	return s, nil
 }
 
 func (s Splash) View() tea.View {
 	if s.width == 0 || s.height == 0 {
-		v := tea.NewView("")
-		v.AltScreen = true
-		return v
+		return tea.NewView("loading...")
 	}
 
 	card := s.renderCard()
-	box := SplashBorderStyle.Render(card)
+	boxLines := strings.Split(card, "\n")
 
-	// Build full-screen output line by line
-	// First: create the plain background with sparks
-	sparkMap := make(map[[2]int]spark, len(s.sparks))
-	for _, sp := range s.sparks {
-		if sp.y >= 0 && sp.y < s.height && sp.x >= 0 && sp.x < s.width {
-			sparkMap[[2]int{sp.x, sp.y}] = sp
-		}
-	}
-
-	// Get box dimensions
-	boxLines := strings.Split(box, "\n")
-	boxH := len(boxLines)
-	boxW := 0
-	for _, l := range boxLines {
-		w := lipgloss.Width(l)
-		if w > boxW {
-			boxW = w
-		}
-	}
-
-	startY := (s.height - boxH) / 2
-	startX := (s.width - boxW) / 2
+	// center the card
+	cardH := len(boxLines)
+	startY := (s.height - cardH) / 2
 	if startY < 0 {
 		startY = 0
 	}
+	endY := startY + cardH
+	maxW := 0
+	for _, l := range boxLines {
+		if w := lipgloss.Width(l); w > maxW {
+			maxW = w
+		}
+	}
+	startX := (s.width - maxW) / 2
 	if startX < 0 {
 		startX = 0
 	}
+	endX := startX + maxW
 
-	endY := startY + boxH
-	endX := startX + boxW
+	// spark map: cell -> spark index
+	type sparkRef struct {
+		charIdx int
+		colIdx  int
+	}
+	sparkMap := map[[2]int]sparkRef{}
+	for _, sp := range s.sparks {
+		key := [2]int{sp.x, sp.y}
+		if _, exists := sparkMap[key]; !exists {
+			sparkMap[key] = sparkRef{charIdx: sp.charIdx, colIdx: sp.colIdx}
+		}
+	}
 
-	var screenLines []string
+	screenLines := make([]string, 0, s.height)
 	boxIdx := 0
-
 	for y := 0; y < s.height; y++ {
 		var line strings.Builder
-
 		if y >= startY && y < endY && boxIdx < len(boxLines) {
-			// This row has the box: left sparks + box + right sparks
-			// Left margin
 			for x := 0; x < startX; x++ {
 				if sp, ok := sparkMap[[2]int{x, y}]; ok {
 					c := sparkColors[sp.colIdx%len(sparkColors)]
@@ -228,10 +261,14 @@ func (s Splash) View() tea.View {
 					line.WriteRune(' ')
 				}
 			}
-			// Box content
-			line.WriteString(boxLines[boxIdx])
+			// Box content, padded to maxW
+			boxLine := boxLines[boxIdx]
 			boxIdx++
-			// Right margin
+			pad := maxW - lipgloss.Width(boxLine)
+			if pad < 0 {
+				pad = 0
+			}
+			line.WriteString(boxLine + strings.Repeat(" ", pad))
 			for x := endX; x < s.width; x++ {
 				if sp, ok := sparkMap[[2]int{x, y}]; ok {
 					c := sparkColors[sp.colIdx%len(sparkColors)]
@@ -242,7 +279,6 @@ func (s Splash) View() tea.View {
 				}
 			}
 		} else {
-			// Full width sparks row
 			for x := 0; x < s.width; x++ {
 				if sp, ok := sparkMap[[2]int{x, y}]; ok {
 					c := sparkColors[sp.colIdx%len(sparkColors)]
@@ -259,103 +295,110 @@ func (s Splash) View() tea.View {
 
 	v := tea.NewView(strings.Join(screenLines, "\n"))
 	v.AltScreen = true
-	v.WindowTitle = s.tavernDomain
+	v.WindowTitle = s.ryolinkDomain
 	return v
 }
 
+// padLine centers raw content inside w, padding both sides so every card
+// line is exactly w wide — per-line left-pad let lines of different widths
+// drift against the rules.
+func padLine(s string, w int) string {
+	lw := lipgloss.Width(s)
+	if lw >= w {
+		return s
+	}
+	left := (w - lw) / 2
+	return strings.Repeat(" ", left) + s + strings.Repeat(" ", w-lw-left)
+}
+
 func (s Splash) renderCard() string {
-	pair := artGradientPairs[s.frame%len(artGradientPairs)]
+	// The wordmark reveal eases out over revealTicks frames, then holds and
+	// shimmers — the Ryoku installer's boot animation, doubled in size.
+	reveal := float64(s.frame) / float64(revealTicks)
+	if reveal > 1 {
+		reveal = 1
+	}
+	reveal = 1 - (1-reveal)*(1-reveal) // ease-out
+	phase := s.frame
 
 	var b strings.Builder
+	w := cardW
 
-	diag := GradientText(strings.Repeat("╱", 44), pair[0], pair[1], false)
-	b.WriteString(diag)
+	b.WriteString(GradientBar(w, s.frame))
 	b.WriteString("\n\n")
 
-	title := GradientText(s.tavernDomain, pair[1], pair[0], true)
-	b.WriteString(centerText(title, len(s.tavernDomain), 44))
+	title := GradientText(s.ryolinkDomain, ColorAmber, ColorHighlight, true)
+	b.WriteString(padLine(title, w))
 	b.WriteString("\n")
-	if s.tagline != "" {
-		sub := SplashSubtitleStyle.Render(s.tagline)
-		b.WriteString(centerText(sub, len(s.tagline), 44))
+	tag := s.tagline
+	if tag == "" {
+		tag = "the ryoku store. and a room."
+	}
+	b.WriteString(padLine(SplashSubtitleStyle.Render(tag), w))
+	b.WriteString("\n\n")
+
+	for _, row := range revealBanner(reveal, phase, 2) {
+		b.WriteString(padLine(row, w))
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
 
-	// Render art centered in a single color to preserve alignment
-	artStyle := lipgloss.NewStyle().Foreground(pair[0])
-	artLines := strings.Split(tavernArt, "\n")
-	maxW := 0
-	for _, l := range artLines {
-		if len(l) > maxW {
-			maxW = len(l)
-		}
-	}
-	var centeredArt strings.Builder
-	for i, l := range artLines {
-		pad := (44 - maxW) / 2
-		if pad < 0 {
-			pad = 0
-		}
-		centeredArt.WriteString(strings.Repeat(" ", pad) + l)
-		if i < len(artLines)-1 {
-			centeredArt.WriteString("\n")
-		}
-	}
-	b.WriteString(artStyle.Render(centeredArt.String()))
-	b.WriteString("\n")
-
 	nick := s.nickname
 	if s.flair {
-		nick = "~" + nick
+		nick = "★ " + nick
 	}
-	b.WriteString(SplashDescStyle.Render("you are ") + NickStyle(0).Render(nick))
+	b.WriteString(padLine(SplashDescStyle.Render("you are ")+NickStyle(0).Render(nick), w))
 	b.WriteString("\n\n")
 
-	b.WriteString(SplashDescStyle.Render("a terminal tavern over SSH."))
+	b.WriteString(padLine(SplashDescStyle.Render("get ryoku — iso, recovery, rescue files."), w))
 	b.WriteString("\n")
-	b.WriteString(SplashDescStyle.Render("chat, play games, hang out."))
+	b.WriteString(padLine(SplashDescStyle.Render("then stay: rooms, games, people."), w))
 	b.WriteString("\n\n")
 
-	b.WriteString(SplashDescStyle.Italic(true).Render("no accounts. no logs. no rules."))
+	b.WriteString(padLine(SplashDescStyle.Italic(true).Render("no accounts. no logs."), w))
 	b.WriteString("\n")
-	b.WriteString(SplashDescStyle.Italic(true).Render("say what you mean."))
+	b.WriteString(padLine(SplashDescStyle.Italic(true).Render("say what you mean."), w))
 	b.WriteString("\n\n")
 
-	b.WriteString(SplashDescStyle.Foreground(ColorDimmer).Render("everything resets every sunday."))
-	b.WriteString("\n")
-	b.WriteString(SplashDescStyle.Foreground(ColorDimmer).Render("nothing is permanent."))
-
+	b.WriteString(padLine(SplashDescStyle.Foreground(ColorDimmer).Render("chat resets every sunday. the store is permanent."), w))
 	b.WriteString("\n\n")
+
 	enterFrame := enterPulse[s.frame%len(enterPulse)]
+	enterDesc := lipgloss.NewStyle().Foreground(ColorSand).Render(" enter — press return")
 	enterKey := SplashKeyStyle.Render(enterFrame)
-	enterDesc := lipgloss.NewStyle().Foreground(ColorSand).Render(" enter the tavern")
 	quitKey := SplashKeyStyle.Render("[ Q ]")
 	quitDesc := lipgloss.NewStyle().Foreground(ColorDim).Render(" exit")
-	b.WriteString(enterKey + enterDesc + "    " + quitKey + quitDesc)
-
+	b.WriteString(padLine(enterKey+enterDesc+"    "+quitKey+quitDesc, w))
 	b.WriteString("\n\n")
-	bottomPair := artGradientPairs[(s.frame+3)%len(artGradientPairs)]
-	b.WriteString(GradientText(strings.Repeat("╱", 44), bottomPair[0], bottomPair[1], false))
+
+	b.WriteString(GradientBar(w, s.frame+20))
 	b.WriteString("\n")
 	verStr := fmt.Sprintf("[ v%s ]", version.Version)
-	b.WriteString(centerText(SplashDescStyle.Render(verStr), len(verStr), 44))
+	b.WriteString(padLine(SplashDescStyle.Render(verStr), w))
 	b.WriteString("\n")
 	cKey := SplashKeyStyle.Render("[ C ]")
 	cDesc := lipgloss.NewStyle().Foreground(ColorDim).Render(" changelog")
-	changeHint := cKey + cDesc
-	b.WriteString(centerText(changeHint, 15, 44))
+	b.WriteString(padLine(cKey+cDesc, w))
+	b.WriteString("\n")
 
 	return b.String()
 }
 
-func centerText(rendered string, rawLen, totalWidth int) string {
-	pad := (totalWidth - rawLen) / 2
-	if pad <= 0 {
-		return rendered
+const cardW = 60
+
+// GradientBar draws a horizontal rule sweeping the ryoku brand gradient —
+// the card's top/bottom border, ping-ponged so the seam never snaps.
+func GradientBar(w, frame int) string {
+	var b strings.Builder
+	for i := 0; i < w; i++ {
+		t := float64((i+frame)%(2*w)) / float64(2*w-1)
+		if t > 0.5 {
+			t = 1 - t
+		}
+		b.WriteString(lipgloss.NewStyle().Foreground(BrandColor(t * 2)).Render("─"))
 	}
-	return strings.Repeat(" ", pad) + rendered
+	return b.String()
 }
 
-type EnterTavernMsg struct{}
+type EnterRyolinkMsg struct{}
 type ShowHelpMsg struct{}

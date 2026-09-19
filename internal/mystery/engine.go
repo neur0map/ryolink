@@ -5,15 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
-	"os"
-	"path/filepath"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 
-	"tavrn.sh/internal/identity"
+	"ryolink/internal/identity"
 )
 
 // Clue is a single piece of evidence returned to the chat.
@@ -36,7 +34,7 @@ type caseData struct {
 	Confession []string          `json:"confession"`
 }
 
-// Engine drives the hidden murder mystery in the tavern lounge.
+// Engine drives the hidden murder mystery in ryolink lounge.
 type Engine struct {
 	triggers   map[string][]Clue
 	found      map[string]bool
@@ -57,21 +55,17 @@ const (
 	maxCluesPerMsg = 2
 )
 
-// New loads a mystery case from caseDir and returns a ready Engine.
+// New loads a mystery case from caseDir and returns a ready Engine. The
+// embedded case ships in the binary; a complete caseDir on disk overrides it.
 func New(caseDir string) (*Engine, error) {
-	raw, err := os.ReadFile(filepath.Join(caseDir, "triggers.json"))
-	if err != nil {
-		return nil, fmt.Errorf("mystery: read triggers: %w", err)
+	raw, sol := loadCaseFiles(caseDir)
+	if raw == nil {
+		return nil, fmt.Errorf("mystery: no case data (disk or embedded)")
 	}
 
 	var cd caseData
 	if err := json.Unmarshal(raw, &cd); err != nil {
 		return nil, fmt.Errorf("mystery: parse triggers: %w", err)
-	}
-
-	sol, err := os.ReadFile(filepath.Join(caseDir, "answer.sha256"))
-	if err != nil {
-		return nil, fmt.Errorf("mystery: read answer: %w", err)
 	}
 
 	e := &Engine{
@@ -251,7 +245,7 @@ func stripPunct(s string) string {
 // pickSender chooses a random fake name that isn't the killer or the last sender.
 func (e *Engine) pickSender() string {
 	for i := 0; i < 10; i++ {
-		n := e.fakeNames[rand.Intn(len(e.fakeNames))]
+		n := e.fakeNames[rand.IntN(len(e.fakeNames))]
 		if n != e.killerName && n != e.lastSender {
 			e.lastSender = n
 			return n

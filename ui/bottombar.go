@@ -35,7 +35,7 @@ func (b BottomBar) View() string {
 	var content string
 	if b.IsDMMode {
 		content = "  " +
-			k.Render("TAB") + " " + d.Render("tavern") + sep +
+			k.Render("TAB") + " " + d.Render("ryolink") + sep +
 			k.Render("ESC") + " " + d.Render("back") + sep +
 			k.Render("↑↓") + " " + d.Render("navigate") + sep +
 			k.Render("ENTER") + " " + d.Render("open")
@@ -70,6 +70,7 @@ func (b BottomBar) View() string {
 		tabDM := k.Render("TAB") + " " + d.Render("DMs"+dmBadge)
 		content = "  " +
 			k.Render("F1") + " " + d.Render("help") + sep +
+			k.Render("CTRL+P") + " " + d.Render("commands") + sep +
 			k.Render("F2") + " " + d.Render("nick") + sep +
 			k.Render("F3") + " " + d.Render("rooms") + sep +
 			f4 + sep +

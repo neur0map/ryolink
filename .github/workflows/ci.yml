@@ -39,7 +39,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Build server
-        run: go build -o bin/tavrn-admin ./cmd/tavrn-admin
+        run: CGO_ENABLED=0 go build -trimpath -o bin/ryolink ./cmd/ryolink
 
   test-internal:
     name: Test internal packages

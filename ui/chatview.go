@@ -10,9 +10,9 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"tavrn.sh/internal/chat"
-	"tavrn.sh/internal/fuzzy"
-	"tavrn.sh/internal/identity"
+	"ryolink/internal/chat"
+	"ryolink/internal/fuzzy"
+	"ryolink/internal/identity"
 )
 
 // Typing dots animation frames

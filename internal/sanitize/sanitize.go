@@ -34,9 +34,10 @@ func Clean(input string) string {
 // ReservedNicks are nicknames that cannot be claimed by regular users.
 var ReservedNicks = map[string]bool{
 	"admin":     true,
-	"tavrn":     true,
+	"ryolink":   true,
 	"system":    true,
 	"bartender": true,
+	"Mika":      true,
 }
 
 var ownerNick string

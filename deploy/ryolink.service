@@ -1,0 +1,42 @@
+[Unit]
+Description=ryolink chatroom
+Documentation=https://ryoku.dev
+After=network.target
+
+# Reference unit for a hand-installed server. The easy path is
+# `sudo ryolink service install`, which generates this from ryolink.yaml
+# (incl. the data dir). Adjust user/paths to your install.
+
+[Service]
+Type=simple
+User=ryolink
+WorkingDirectory=/home/ryolink
+Environment=RYOLINK_CONFIG=/home/ryolink/ryolink.yaml
+EnvironmentFile=-/etc/ryolink/env
+ExecStart=/usr/local/bin/ryolink up
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+
+# port 22 without root: exactly one capability
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ryolink
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

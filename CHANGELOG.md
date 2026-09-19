@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.8
+
+- command palette — `ctrl+p` lists every action, fuzzy filter, enter runs it
+- keybinds reorganized: `ctrl+r` opens rooms, `ctrl+m` toggles cursor mode
+- storefront is a bento grid — ASCII distro logos, curl + browser lines on each card
+- splash rebuilt: bigger wordmark, rigid alignment
+- SSH lockdown proven live — exec/sftp/scp/forwarding refused, banner `SSH-2.0-ryolink`
+- SECURITY.md + DEVELOPMENT.md — what's protected, what isn't, what will bite you
+- `ryolink init` creates the database, not just the config
+
+## v0.7 — the store
+
+- the ryoku store front — `#store` is the landing room, catalog lives in ryolink.yaml
+- web surface: landing page, `/api/items`, resumable sha256 downloads, mirror redirects, download counts
+- ryoku visual language — the installer palette and the RYOKU wordmark boot shimmer
+- cursor-first input — click rooms/items, `ctrl+r` toggles, keys keep working beside it
+- the bartender is Mika now — `@mika`
+- charm libraries bumped to crush's current pins
+
+## v0.6
+
+- single self-contained binary — radio catalogue, bartender persona, and mystery case embedded
+- `ryolink init` / `up` / `status` / `service install` — one YAML configures everything
+- built-in abuse firewall — per-IP connection budgets, auth-fail bans, scanner-probe bans, persistent deny list (`--deny`)
+- `server.data_dir` — every mutable file in one place
+- hardened generated systemd unit — non-root, one capability, ProtectSystem=strict
+
 ## v0.5
 
 - reddit feed — browse posts, read comments in-terminal
@@ -49,7 +76,7 @@
 
 ## v0.1
 
-- SSH tavern with 4 rooms
+- SSH ryolink with 4 rooms
 - gallery — sticky notes you can drag around
 - co-op sudoku in #games
 - animated splash with floating sparks

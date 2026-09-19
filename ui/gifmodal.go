@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"tavrn.sh/internal/gif"
+	"ryolink/internal/gif"
 )
 
 const gifModalRenderWidth = 60

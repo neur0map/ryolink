@@ -10,8 +10,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"tavrn.sh/internal/chat"
-	"tavrn.sh/internal/mention"
+	"ryolink/internal/chat"
+	"ryolink/internal/mention"
 )
 
 type ModalType int
@@ -32,6 +32,7 @@ const (
 	ModalSubmitFlag
 	ModalLeaderboard
 	ModalWargameRules
+	ModalPalette
 )
 
 // CloseModalMsg signals modal should close.
@@ -81,12 +82,16 @@ func (h HelpModal) View(width, height int) string {
 	b.WriteString("\n")
 	keys := []struct{ k, d string }{
 		{"F1 or ?", "this help"},
+		{"CTRL+P", "command palette — everything lives here"},
 		{"F2", "change nickname"},
-		{"F3", "switch rooms"},
+		{"F3 / CTRL+R", "switch rooms"},
 		{"F4", "view mentions"},
 		{"F5", "post note"},
 		{"F6", "tankard clicker"},
 		{"F7", "leaderboard"},
+		{"CTRL+M", "toggle cursor mode (mouse clicks)"},
+		{"S", "browse the store"},
+		{"@mika", "talk to the keeper of the bar"},
 		{"TAB", "toggle DMs"},
 		{"SHIFT+TAB", "reddit feed"},
 		{"`", "focus shared posts"},

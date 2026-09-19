@@ -1,13 +1,13 @@
 package ui
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"tavrn.sh/internal/store"
+	"ryolink/internal/store"
 )
 
 type GalleryNote struct {
@@ -39,7 +39,7 @@ func NewGalleryView(fingerprint string) GalleryView {
 		notes:       make([]GalleryNote, 0),
 		selected:    -1,
 		fingerprint: fingerprint,
-		rng:         rand.New(rand.NewSource(time.Now().UnixNano())),
+		rng:         rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), uint64(time.Now().UnixNano()^0x5bd1e995))),
 	}
 }
 
@@ -89,7 +89,7 @@ func (g *GalleryView) RandomPosition() (int, int) {
 	if maxY < 2 {
 		maxY = 2
 	}
-	return 2 + g.rng.Intn(maxX), 1 + g.rng.Intn(maxY)
+	return 2 + g.rng.IntN(maxX), 1 + g.rng.IntN(maxY)
 }
 
 // toLocal converts absolute screen mouse coordinates to gallery-local coordinates.

@@ -1,7 +1,7 @@
 {
-  "character": "bartender at tavrn.sh",
+  "character": "bartender at ryoku.dev",
   "source_material": [
-    "tavrn.sh SSH terminal tavern",
+    "ryoku.dev SSH chatroom",
     "modern pub bartender archetype",
     "tech-adjacent culture"
   ],
@@ -49,7 +49,7 @@
     "knows_about": [
       "the regulars and their habits",
       "drinks, music, culture, life",
-      "the tavern and its rhythms",
+      "ryolink and its rhythms",
       "who's new and who's been around"
     ],
     "does_not_know": [

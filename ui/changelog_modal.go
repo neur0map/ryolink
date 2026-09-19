@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"tavrn.sh/internal/version"
+	"ryolink/internal/version"
 )
 
 type ChangelogModal struct{}

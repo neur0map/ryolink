@@ -5,7 +5,7 @@ bin/
 *.db-shm
 *.log
 .env
-tavern.yaml
+ryolink.yaml
 .git
 .worktrees/
 docs/

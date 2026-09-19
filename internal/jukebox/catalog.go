@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"tavrn.sh/catalogs"
+	"ryolink/catalogs"
 )
 
 type catalogConfig struct {

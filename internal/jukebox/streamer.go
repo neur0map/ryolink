@@ -203,7 +203,7 @@ func estimateMP3Duration(data []byte) int {
 }
 
 func ffprobeDuration(data []byte) int {
-	tmp, err := os.CreateTemp("", "tavrn-probe-*.mp3")
+	tmp, err := os.CreateTemp("", "ryolink-probe-*.mp3")
 	if err != nil {
 		return 0
 	}

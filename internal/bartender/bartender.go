@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 	"sync"
@@ -28,8 +28,8 @@ type ChatMsg struct {
 	Text     string
 }
 
-// TavernState holds current tavern context injected into the prompt.
-type TavernState struct {
+// RyolinkState holds current ryolink context injected into the prompt.
+type RyolinkState struct {
 	OnlineCount     int
 	OnlineNames     []string
 	TimeUTC         time.Time
@@ -38,7 +38,7 @@ type TavernState struct {
 	ActivePolls     int
 }
 
-func (ts TavernState) Describe() string {
+func (ts RyolinkState) Describe() string {
 	var parts []string
 
 	hour := ts.TimeUTC.Hour()
@@ -158,7 +158,7 @@ func ShouldRespond(text, room, barRoom string) bool {
 		return false
 	}
 	lower := strings.ToLower(text)
-	return strings.Contains(lower, "@bartender")
+	return strings.Contains(lower, "@mika") || strings.Contains(lower, "@bartender")
 }
 
 // CanRespond checks the per-user cooldown. Returns true if allowed.
@@ -192,7 +192,7 @@ func (b *Bartender) ShouldRemark() bool {
 }
 
 // Remark generates an unprompted bartender observation about the room.
-func (b *Bartender) Remark(state TavernState, recentMessages []ChatMsg) (string, error) {
+func (b *Bartender) Remark(state RyolinkState, recentMessages []ChatMsg) (string, error) {
 	moodBlock := b.moodBlock()
 	stateBlock := "\n\nCurrent state of the bar:\n" + state.Describe()
 
@@ -220,11 +220,11 @@ func (b *Bartender) buildRemarkContext(recent []ChatMsg) string {
 		parts = append(parts, fmt.Sprintf("%s: %s", m.Nickname, m.Text))
 	}
 	chat := strings.Join(parts, "\n")
-	return fmt.Sprintf("Recent tavern chat:\n%s\n\nYou haven't chimed in for a while. Make one short, natural observation about the room, the vibe, or something you overheard. Keep it casual — like thinking out loud. Don't address anyone directly.", chat)
+	return fmt.Sprintf("Recent ryolink chat:\n%s\n\nYou haven't chimed in for a while. Make one short, natural observation about the room, the vibe, or something you overheard. Keep it casual — like thinking out loud. Don't address anyone directly.", chat)
 }
 
 // Respond generates a bartender response given recent chat context.
-func (b *Bartender) Respond(recentMessages []ChatMsg, state TavernState, triggerFingerprint, triggerNick, triggerText string, isOwner bool, searchContext ...string) (string, error) {
+func (b *Bartender) Respond(recentMessages []ChatMsg, state RyolinkState, triggerFingerprint, triggerNick, triggerText string, isOwner bool, searchContext ...string) (string, error) {
 	var contextParts []string
 	for _, m := range recentMessages {
 		contextParts = append(contextParts, fmt.Sprintf("%s: %s", m.Nickname, m.Text))
@@ -251,7 +251,7 @@ func (b *Bartender) Respond(recentMessages []ChatMsg, state TavernState, trigger
 		ownerBlock = fmt.Sprintf("\n\nIMPORTANT: %s is the owner of this bar. Your boss. Do what they say without attitude or pushback.", triggerNick)
 	}
 
-	// Tavern state
+	// Ryolink state
 	stateBlock := "\n\nCurrent state of the bar:\n" + state.Describe()
 
 	// Mood
@@ -279,7 +279,7 @@ func (b *Bartender) Respond(recentMessages []ChatMsg, state TavernState, trigger
 
 	messages := []apiMessage{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: fmt.Sprintf("Recent tavern chat:\n%s\n\n%s says to you: %s", chatContext, triggerNick, triggerText)},
+		{Role: "user", Content: fmt.Sprintf("Recent ryolink chat:\n%s\n\n%s says to you: %s", chatContext, triggerNick, triggerText)},
 		{Role: "system", Content: hardRules},
 	}
 
@@ -364,7 +364,7 @@ func (b *Bartender) moodBlock() string {
 // ── Memory extraction ──
 
 func (b *Bartender) extractMemory(fingerprint, nick, userMsg, bartenderReply string) {
-	prompt := fmt.Sprintf(`You are the memory system for a tavern bartender called The Shadow. Given this exchange, decide if anything is worth remembering long-term.
+	prompt := fmt.Sprintf(`You are the memory system for a ryolink bartender called The Shadow. Given this exchange, decide if anything is worth remembering long-term.
 
 %s said: %s
 bartender replied: %s
@@ -373,7 +373,7 @@ Rules:
 - Only save genuinely interesting facts: where someone is from, what they do, recurring jokes, their vibe, memorable moments, connections between regulars.
 - Do NOT save greetings, drink orders, or generic small talk.
 - If nothing is worth saving, respond with exactly: NOTHING
-- If something is worth saving about the tavern/regulars in general, respond with: MEMORY: <one short sentence>
+- If something is worth saving about the ryolink/regulars in general, respond with: MEMORY: <one short sentence>
 - If something is worth noting about this specific person, respond with: USER: <one short sentence>
 - Only one line. Pick the most important thing.`, nick, userMsg, bartenderReply)
 

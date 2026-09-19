@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"tavrn.sh/internal/dm"
+	"ryolink/internal/dm"
 )
 
 type DMOpenConvoMsg struct {
@@ -90,7 +90,7 @@ func (d DMInbox) View() string {
 		b.WriteString("\n")
 		b.WriteString("  " + dim.Render("No conversations yet."))
 		b.WriteString("\n\n")
-		b.WriteString("  " + dim.Render("Use ") + highlight.Render("/dm @name") + dim.Render(" in the tavern to start one."))
+		b.WriteString("  " + dim.Render("Use ") + highlight.Render("/dm @name") + dim.Render(" in ryolink to start one."))
 		b.WriteString("\n")
 	}
 
@@ -144,7 +144,7 @@ func (d DMInbox) View() string {
 
 	// Footer
 	b.WriteString("\n")
-	b.WriteString("  " + dimmer.Render("↑↓ navigate · ENTER open · TAB back to tavern"))
+	b.WriteString("  " + dimmer.Render("↑↓ navigate · ENTER open · TAB back to ryolink"))
 
 	return b.String()
 }

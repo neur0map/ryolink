@@ -10,8 +10,8 @@ import (
 
 func buildAdmin(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "tavrn-admin")
-	cmd := exec.Command("go", "build", "-o", bin, "../../cmd/tavrn-admin")
+	bin := filepath.Join(t.TempDir(), "ryolink")
+	cmd := exec.Command("go", "build", "-o", bin, "../../cmd/ryolink")
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -27,8 +27,8 @@ func TestAdminHelp(t *testing.T) {
 		t.Fatalf("help failed: %v\n%s", err, out)
 	}
 	output := string(out)
-	if !strings.Contains(output, "Maintainer commands") {
-		t.Errorf("expected 'Maintainer commands' in help output, got: %s", output)
+	if !strings.Contains(output, "ryolink init") {
+		t.Errorf("expected the init verb in help output, got: %s", output)
 	}
 	if !strings.Contains(output, "--update") {
 		t.Errorf("expected '--update' in help output")
@@ -51,7 +51,7 @@ func TestAdminHelpFlags(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s failed: %v\n%s", flag, err, out)
 		}
-		if !strings.Contains(string(out), "Maintainer commands") {
+		if !strings.Contains(string(out), "ryolink init") {
 			t.Errorf("%s did not show help", flag)
 		}
 	}

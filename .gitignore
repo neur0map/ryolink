@@ -1,8 +1,8 @@
 bin/
-/tavrn
-/tavrn-admin
-tavrn.db
-tavrn.log
+/ryolink
+/ryolink-admin
+ryolink.db
+ryolink.log
 .ssh/
 *.db-wal
 *.db-shm
@@ -13,6 +13,15 @@ docs/*-design.md
 .addroom
 .purge
 .env
-tavern.yaml
+ryolink.yaml
 docs/plans/
 .DS_Store
+# prowl-agent: derived state
+.prowl/index.db*
+.prowl/cache/
+.prowl/logs/
+.prowl/editor/
+.prowl/setup-applies.json
+.prowl-setup.lock
+# /prowl-agent: derived state
+.prowl/

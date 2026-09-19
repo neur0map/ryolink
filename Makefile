@@ -1,10 +1,12 @@
-.PHONY: run test check clean
+.PHONY: ryolink run test check clean
 
-# Build server and start it
-# Set OPENAI_API_KEY in env to enable bartender AI
-run:
-	@go build -o bin/tavrn-admin ./cmd/tavrn-admin
-	@./bin/tavrn-admin & sleep 1 && ssh localhost -p 2222; kill %1 2>/dev/null
+# Build the single static binary (assets embedded; runs anywhere)
+ryolink:
+	CGO_ENABLED=0 go build -trimpath -o ryolink ./cmd/ryolink
+
+# Dev: build, start on :2222, connect. Needs ./ryolink.yaml (or `./ryolink init`)
+run: ryolink
+	@./ryolink up & sleep 1 && ssh localhost -p 2222; kill %1 2>/dev/null
 
 # Run all tests with race detector
 test:
@@ -14,10 +16,11 @@ test:
 check:
 	gofmt -w .
 	go vet ./...
-	go build -o bin/tavrn-admin ./cmd/tavrn-admin
+	CGO_ENABLED=0 go build -trimpath -o ryolink ./cmd/ryolink
 	go test -race ./internal/... ./ui/...
 	@echo "All good."
 
 # Remove binaries and db
 clean:
-	rm -rf bin/ tavrn.db
+	rm -f ryolink
+	rm -rf bin/

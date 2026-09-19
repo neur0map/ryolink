@@ -118,6 +118,12 @@ func (s *Store) migrate() error {
 		note        TEXT NOT NULL,
 		updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
+	CREATE TABLE IF NOT EXISTS net_bans (
+		cidr       TEXT PRIMARY KEY,
+		reason     TEXT,
+		banned_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+		expires_at DATETIME
+	);
 	CREATE TABLE IF NOT EXISTS ssh_links (
 		id      INTEGER PRIMARY KEY AUTOINCREMENT,
 		address TEXT NOT NULL UNIQUE

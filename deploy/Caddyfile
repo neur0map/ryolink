@@ -1,13 +1,12 @@
-tavrn.sh {
-	root * /var/www/tavrn
-	@goget query go-get=1
-	rewrite @goget /goget.html
-
-	# Web audio streaming — proxied to tavrn admin
-	reverse_proxy /stream localhost:8090 {
+ryoku.dev {
+	# ryolink serves everything on one loopback port: the store landing
+	# page, /api/items, /files/* downloads, /d/* mirror redirects, and the
+	# radio stream. Caddy's only jobs are TLS and publishing that port —
+	# there is no web root and no static site to deploy anymore.
+	#
+	# Big ISOs stream through here; disable Caddy's request timeouts so a
+	# slow resume is never cut off, and stream without buffering.
+	reverse_proxy 127.0.0.1:8090 {
 		flush_interval -1
 	}
-	reverse_proxy /now-playing localhost:8090
-
-	file_server
 }

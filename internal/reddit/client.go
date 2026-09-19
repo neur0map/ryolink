@@ -20,7 +20,7 @@ import (
 const (
 	defaultCacheTTL = 1 * time.Hour
 	httpTimeout     = 10 * time.Second
-	userAgent       = "tavrn:v0.5 (terminal tavern, github.com/neur0map/tavrn)"
+	userAgent       = "ryolink:v0.5 (ryolink SSH chatroom, github.com/neur0map/ryolink)"
 	maxImageBytes   = 2 * 1024 * 1024 // 2MB
 	maxPosts        = 100
 )

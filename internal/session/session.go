@@ -3,7 +3,7 @@ package session
 import (
 	"time"
 
-	"tavrn.sh/internal/ratelimit"
+	"ryolink/internal/ratelimit"
 )
 
 type MsgType int

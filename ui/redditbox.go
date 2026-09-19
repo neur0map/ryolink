@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"charm.land/lipgloss/v2"
-	"tavrn.sh/internal/chat"
+	"ryolink/internal/chat"
 )
 
 // RenderRedditBox renders a shared Reddit post as a styled card in chat.
