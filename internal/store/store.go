@@ -804,6 +804,42 @@ func (s *Store) RemoveFeedSubreddit(subreddit string) error {
 	return err
 }
 
+// SyncFeedSubreddits applies the config's list as the source of truth:
+// missing subs are added, unlisted ones removed.
+func (s *Store) SyncFeedSubreddits(subs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	want := map[string]bool{}
+	for _, sub := range subs {
+		want[sub] = true
+	}
+	rows, err := s.db.Query(`SELECT subreddit FROM feed_subreddits`)
+	if err != nil {
+		return err
+	}
+	var current []string
+	for rows.Next() {
+		var sub string
+		if rows.Scan(&sub) == nil {
+			current = append(current, sub)
+		}
+	}
+	rows.Close()
+	for _, sub := range current {
+		if !want[sub] {
+			if _, err := s.db.Exec(`DELETE FROM feed_subreddits WHERE subreddit = ?`, sub); err != nil {
+				return err
+			}
+		}
+	}
+	for _, sub := range subs {
+		if _, err := s.db.Exec(`INSERT OR IGNORE INTO feed_subreddits (subreddit, added_by) VALUES (?, 'config')`, sub); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // FeedSubreddits returns all configured feed subreddits.
 func (s *Store) FeedSubreddits() []string {
 	rows, err := s.db.Query(`SELECT subreddit FROM feed_subreddits ORDER BY added_at`)

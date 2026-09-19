@@ -9,6 +9,17 @@ type Entry struct {
 // Changelog lists versions newest-first.
 var Changelog = []Entry{
 	{
+		Version: "0.9",
+		Changes: []string{
+			"store logos are block-letter wordmarks — one word in the config, five rows of art",
+			"wargame flags live in ryolink.yaml (wargame: games:) — add, fix, or remove levels by editing",
+			"purge schedule is config-controlled (purge: weekday/time/disabled)",
+			"feed subreddits are config-controlled (feed: subreddits:) — the list is the source of truth",
+			"`ryolink service reload` re-applies flags + feed without a restart",
+			"bandit's full board ships in the example config — real OverTheWire level passwords",
+		},
+	},
+	{
 		Version: "0.8",
 		Changes: []string{
 			"command palette — ctrl+p lists every action, fuzzy filter, enter runs it",

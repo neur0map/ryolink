@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.9
+
+- store logos are block-letter wordmarks — one word in the config renders as five rows of art
+- wargame flags live in `ryolink.yaml` (`wargame: games:`): add, fix, or remove levels by editing
+- purge schedule is config-controlled (`purge: weekday / time / disabled`)
+- feed subreddits are config-controlled (`feed: subreddits:`) — the list is the source of truth
+- `ryolink service reload` re-applies flags + feed without a restart
+- the example config ships bandit's full board — real OverTheWire level passwords, walked live
+
 ## v0.8
 
 - command palette — `ctrl+p` lists every action, fuzzy filter, enter runs it

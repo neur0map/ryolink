@@ -78,11 +78,36 @@ store:
       version: ""
       desc: "The live image. Arch underneath, Ryoku desktop on top."
       url: "https://github.com/ryoku-dev/ryoku-arch/releases/latest"
+      logo: "ARCH"           # one word = block-letter wordmark; multi-line = ASCII art
     - id: "recovery"
       name: "ryoku-recovery"
       kind: script
       desc: "The panic button: rebuild the desktop when an update bites."
       path: "store/ryoku-recovery.sh"
+      logo: "RYOKU"
+
+# The data wipe that keeps the room disposable (UTC).
+purge:
+  disabled: false
+  weekday: "sunday"
+  time: "23:59"
+
+# The reddit feed catalog — this list is the source of truth; edit it and
+# "ryolink service reload". Needs reddit keys below to actually fetch.
+feed:
+  subreddits:
+    - "archlinux"
+    - "unixporn"
+
+# Wargame CTF boards. Add a room of type wargame (see rooms: below) and
+# list its flags here: level -> password. An empty value removes a level.
+# Synced at startup and on "ryolink service reload".
+wargame:
+  games: {}
+  #   bandit:
+  #     1: "the-password-for-level-1"
+  #     2: ""        # removes level 2
+
 
 # Optional API keys. Environment variables of the same name win, so secrets
 # can stay out of this file (EnvironmentFile= in systemd).
@@ -225,6 +250,7 @@ WorkingDirectory=%[3]s
 Environment=RYOLINK_CONFIG=%[4]s
 EnvironmentFile=-/etc/ryolink/env
 ExecStart=%[2]s up
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=3
 LimitNOFILE=65535
@@ -254,7 +280,7 @@ WantedBy=multi-user.target
 `, user, binary, dataDir, configPath)
 }
 
-// runService: ryolink service install|remove|start|stop|restart|status|logs
+// runService: ryolink service install|remove|start|stop|restart|reload|status|logs
 func runService(args []string) {
 	sub := "status"
 	if len(args) > 0 {
@@ -269,7 +295,7 @@ func runService(args []string) {
 		os.Remove("/etc/systemd/system/ryolink.service")
 		run("systemctl", "daemon-reload")
 		fmt.Println("ryolink.service removed (data dir and config untouched).")
-	case "start", "stop", "restart", "status":
+	case "start", "stop", "restart", "reload", "status":
 		run("systemctl", sub, "ryolink")
 	case "logs":
 		cmd := exec.Command("journalctl", "-u", "ryolink", "--no-pager", "-n", "100")
@@ -277,7 +303,7 @@ func runService(args []string) {
 		cmd.Stderr = os.Stderr
 		cmd.Run()
 	default:
-		fmt.Println("Usage: ryolink service install|remove|start|stop|restart|status|logs")
+		fmt.Println("Usage: ryolink service install|remove|start|stop|restart|reload|status|logs")
 	}
 }
 

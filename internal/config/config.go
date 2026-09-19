@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -64,6 +65,39 @@ type Config struct {
 	Store    StoreConfig    `yaml:"store"`
 	Bind     BindConfig     `yaml:"bind"`
 	Rooms    []RoomConfig   `yaml:"rooms"`
+	Wargame  WargameConfig  `yaml:"wargame"`
+	Purge    PurgeConfig    `yaml:"purge"`
+	Feed     FeedConfig     `yaml:"feed"`
+}
+
+// WargameConfig seeds the CTF flag store from the YAML so levels can be
+// added, fixed, or removed by editing one file. Flags are synced into the
+// database at startup and on reload; a level listed with an
+// empty flag is *removed* from the board.
+type WargameConfig struct {
+	// Games maps wargame name -> level -> flag, e.g.
+	//   wargame:
+	//     games:
+	//       bandit:
+	//         1: "somepassword"
+	//         2: "anotherpassword"
+	Games map[string]map[int]string `yaml:"games"`
+}
+
+// PurgeConfig controls the data wipe. The schedule is a weekday + HH:MM in
+// UTC; `disabled: true` keeps the room permanent — the splash and help text
+// say "resets weekly", so change them too if you turn it off.
+type PurgeConfig struct {
+	Disabled bool   `yaml:"disabled"`
+	Weekday  string `yaml:"weekday"` // sunday (default) ... saturday
+	Time     string `yaml:"time"`    // HH:MM UTC, default 23:59
+}
+
+// FeedConfig is the reddit feed catalog. The list is authoritative: on
+// startup (and on reload) ryolink syncs it into the database, so editing the
+// YAML adds and removes subs. `--feed-add/--feed-remove` still work live.
+type FeedConfig struct {
+	Subreddits []string `yaml:"subreddits"`
 }
 
 // BindConfig carries interaction preferences (input-first vs keys).
@@ -153,6 +187,8 @@ func Default() *Config {
 	c.Security.ProbeBanMinutes = 60
 	c.Store.Title = "Ryoku Store"
 	c.Bind.Mouse = "auto"
+	c.Purge.Weekday = "sunday"
+	c.Purge.Time = "23:59"
 	return c
 }
 
@@ -246,7 +282,47 @@ func (c *Config) validate() error {
 			}
 		}
 	}
+	if !c.Purge.Disabled {
+		if _, _, _, err := c.PurgeTime(); err != nil {
+			return err
+		}
+	}
+	for game, levels := range c.Wargame.Games {
+		for lvl, flag := range levels {
+			if lvl < 1 {
+				return fmt.Errorf("ryolink.yaml: wargame %q has level %d; levels start at 1", game, lvl)
+			}
+			_ = flag // empty flag = remove the level; validated by the sync
+		}
+	}
 	return nil
+}
+
+// PurgeTime resolves the purge schedule to a weekday + HH:MM (UTC).
+func (c *Config) PurgeTime() (time.Weekday, int, int, error) {
+	day := time.Sunday
+	if c.Purge.Weekday != "" {
+		d, err := time.Parse("Monday", c.Purge.Weekday)
+		if err != nil {
+			// try title case: "sunday" -> "Sunday"
+			w := c.Purge.Weekday
+			if w != "" {
+				w = strings.ToUpper(w[:1]) + strings.ToLower(w[1:])
+			}
+			d, err = time.Parse("Monday", w)
+			if err != nil {
+				return 0, 0, 0, fmt.Errorf("ryolink.yaml: purge.weekday must be a day name (got %q)", c.Purge.Weekday)
+			}
+		}
+		day = d.Weekday()
+	}
+	hh, mm := 23, 59
+	if c.Purge.Time != "" {
+		if _, err := fmt.Sscanf(c.Purge.Time, "%d:%d", &hh, &mm); err != nil || hh < 0 || hh > 23 || mm < 0 || mm > 59 {
+			return 0, 0, 0, fmt.Errorf("ryolink.yaml: purge.time must be HH:MM (got %q)", c.Purge.Time)
+		}
+	}
+	return day, hh, mm, nil
 }
 
 // RoomNames returns room names in config order.

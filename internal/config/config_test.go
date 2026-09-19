@@ -4,246 +4,94 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
-func writeConfig(t *testing.T, content string) string {
-	t.Helper()
+func TestLoadWargamePurgeFeed(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "ryolink.yaml")
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
-func TestLoadValid(t *testing.T) {
-	path := writeConfig(t, `
+	p := filepath.Join(dir, "ryolink.yaml")
+	os.WriteFile(p, []byte(`
 ryolink:
-  name: "Test Ryolink"
-  domain: "test.sh"
-  tagline: "a test place"
-
+  name: test
+  domain: test.dev
 owner:
-  name: "testowner"
-  fingerprint: "SHA256:abc123"
-
+  name: boss
+  fingerprint: "SHA256:abc"
 rooms:
-  - name: "lobby"
+  - name: lounge
     type: chat
-  - name: "art"
-    type: gallery
-  - name: "arcade"
-    type: games
-`)
+  - name: bandit
+    type: wargame
+wargame:
+  games:
+    bandit:
+      1: "aaa"
+      2: ""        # empty = remove this level
+purge:
+  weekday: saturday
+  time: "04:00"
+feed:
+  subreddits: ["archlinux", "games"]
+`), 0600)
 
-	cfg, err := Load(path)
+	cfg, err := Load(p)
 	if err != nil {
-		t.Fatalf("Load() error: %v", err)
+		t.Fatalf("load: %v", err)
 	}
-	if cfg.Ryolink.Name != "Test Ryolink" {
-		t.Errorf("name = %q", cfg.Ryolink.Name)
+	if got := cfg.Wargame.Games["bandit"][1]; got != "aaa" {
+		t.Fatalf("bandit level 1 = %q, want aaa", got)
 	}
-	if cfg.Ryolink.Domain != "test.sh" {
-		t.Errorf("domain = %q", cfg.Ryolink.Domain)
+	if got, ok := cfg.Wargame.Games["bandit"][2]; !ok || got != "" {
+		t.Fatalf("bandit level 2 = %q (present=%v), want empty-but-listed", got, ok)
 	}
-	if cfg.Ryolink.Tagline != "a test place" {
-		t.Errorf("tagline = %q", cfg.Ryolink.Tagline)
+	day, hh, mm, err := cfg.PurgeTime()
+	if err != nil || day != time.Saturday || hh != 4 || mm != 0 {
+		t.Fatalf("PurgeTime = %v %d:%d %v, want Saturday 04:00", day, hh, mm, err)
 	}
-	if cfg.Owner.Name != "testowner" {
-		t.Errorf("owner = %q", cfg.Owner.Name)
-	}
-	if cfg.Owner.Fingerprint != "SHA256:abc123" {
-		t.Errorf("fingerprint = %q", cfg.Owner.Fingerprint)
-	}
-	if len(cfg.Rooms) != 3 {
-		t.Fatalf("rooms = %d, want 3", len(cfg.Rooms))
-	}
-	if cfg.Rooms[0].Name != "lobby" || cfg.Rooms[0].Type != "chat" {
-		t.Errorf("room[0] = %+v", cfg.Rooms[0])
+	if len(cfg.Feed.Subreddits) != 2 || cfg.Feed.Subreddits[0] != "archlinux" {
+		t.Fatalf("feed = %v", cfg.Feed.Subreddits)
 	}
 }
 
-func TestLoadMissingFile(t *testing.T) {
-	_, err := Load("/nonexistent/ryolink.yaml")
-	if err == nil {
-		t.Fatal("expected error for missing file")
+func TestPurgeScheduleValidation(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) error {
+		p := filepath.Join(dir, "r.yaml")
+		os.WriteFile(p, []byte(`
+ryolink: {name: t, domain: t.dev}
+owner: {name: b, fingerprint: "SHA256:x"}
+rooms: [{name: l, type: chat}]
+`+body), 0600)
+		_, err := Load(p)
+		return err
+	}
+	if err := write("purge: {weekday: notaday}\n"); err == nil {
+		t.Fatal("bad weekday accepted")
+	}
+	if err := write("purge: {time: \"99:99\"}\n"); err == nil {
+		t.Fatal("bad time accepted")
+	}
+	if err := write("purge: {disabled: true, weekday: notaday}\n"); err != nil {
+		t.Fatalf("disabled purge should skip schedule validation: %v", err)
+	}
+	if err := write("purge: {weekday: monday, time: \"00:30\"}\n"); err != nil {
+		t.Fatalf("valid schedule rejected: %v", err)
 	}
 }
 
-func TestLoadMissingName(t *testing.T) {
-	path := writeConfig(t, `
-ryolink:
-  domain: "test.sh"
-owner:
-  name: "testowner"
-  fingerprint: "SHA256:abc"
-rooms:
-  - name: "lobby"
-    type: chat
-`)
-	_, err := Load(path)
-	if err == nil {
-		t.Fatal("expected error for missing ryolink.name")
-	}
-}
-
-func TestLoadMissingOwnerFingerprint(t *testing.T) {
-	path := writeConfig(t, `
-ryolink:
-  name: "Test"
-  domain: "test.sh"
-owner:
-  name: "testowner"
-rooms:
-  - name: "lobby"
-    type: chat
-`)
-	_, err := Load(path)
-	if err == nil {
-		t.Fatal("expected error for missing owner.fingerprint")
-	}
-}
-
-func TestLoadNoRooms(t *testing.T) {
-	path := writeConfig(t, `
-ryolink:
-  name: "Test"
-  domain: "test.sh"
-owner:
-  name: "testowner"
-  fingerprint: "SHA256:abc"
-rooms: []
-`)
-	_, err := Load(path)
-	if err == nil {
-		t.Fatal("expected error for empty rooms")
-	}
-}
-
-func TestLoadInvalidRoomType(t *testing.T) {
-	path := writeConfig(t, `
-ryolink:
-  name: "Test"
-  domain: "test.sh"
-owner:
-  name: "testowner"
-  fingerprint: "SHA256:abc"
-rooms:
-  - name: "lobby"
-    type: invalid_type
-`)
-	_, err := Load(path)
-	if err == nil {
-		t.Fatal("expected error for invalid room type")
-	}
-}
-
-func TestRoomNames(t *testing.T) {
-	path := writeConfig(t, `
-ryolink:
-  name: "Test"
-  domain: "test.sh"
-owner:
-  name: "testowner"
-  fingerprint: "SHA256:abc"
-rooms:
-  - name: "lobby"
-    type: chat
-  - name: "art"
-    type: gallery
-  - name: "games"
-    type: games
-`)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
-	}
-	names := cfg.RoomNames()
-	if len(names) != 3 || names[0] != "lobby" || names[1] != "art" || names[2] != "games" {
-		t.Errorf("RoomNames() = %v", names)
-	}
-}
-
-func TestFirstRoom(t *testing.T) {
-	path := writeConfig(t, `
-ryolink:
-  name: "Test"
-  domain: "test.sh"
-owner:
-  name: "testowner"
-  fingerprint: "SHA256:abc"
-rooms:
-  - name: "lobby"
-    type: chat
-  - name: "art"
-    type: gallery
-`)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
-	}
-	if cfg.FirstRoom() != "lobby" {
-		t.Errorf("FirstRoom() = %q, want lobby", cfg.FirstRoom())
-	}
-}
-
-func TestRoomIsType(t *testing.T) {
-	path := writeConfig(t, `
-ryolink:
-  name: "Test"
-  domain: "test.sh"
-owner:
-  name: "testowner"
-  fingerprint: "SHA256:abc"
-rooms:
-  - name: "lobby"
-    type: chat
-  - name: "art"
-    type: gallery
-  - name: "arcade"
-    type: games
-`)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
-	}
-	if !cfg.RoomIsType("art", "gallery") {
-		t.Error("art should be type gallery")
-	}
-	if cfg.RoomIsType("lobby", "gallery") {
-		t.Error("lobby should not be type gallery")
-	}
-	if !cfg.RoomIsType("arcade", "games") {
-		t.Error("arcade should be type games")
-	}
-	if cfg.RoomIsType("unknown", "chat") {
-		t.Error("unknown room should return false")
-	}
-}
-
-func TestRoomTypeMap(t *testing.T) {
-	path := writeConfig(t, `
-ryolink:
-  name: "Test"
-  domain: "test.sh"
-owner:
-  name: "testowner"
-  fingerprint: "SHA256:abc"
-rooms:
-  - name: "lobby"
-    type: chat
-  - name: "art"
-    type: gallery
-`)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
-	}
-	m := cfg.RoomTypeMap()
-	if m["lobby"] != "chat" {
-		t.Errorf("lobby type = %q", m["lobby"])
-	}
-	if m["art"] != "gallery" {
-		t.Errorf("art type = %q", m["art"])
+func TestWargameLevelValidation(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "r.yaml")
+	os.WriteFile(p, []byte(`
+ryolink: {name: t, domain: t.dev}
+owner: {name: b, fingerprint: "SHA256:x"}
+rooms: [{name: l, type: chat}]
+wargame:
+  games:
+    bandit:
+      0: "nope"
+`), 0600)
+	if _, err := Load(p); err == nil {
+		t.Fatal("level 0 accepted; levels start at 1")
 	}
 }

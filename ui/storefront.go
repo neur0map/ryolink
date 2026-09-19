@@ -179,11 +179,26 @@ func (s *Storefront) bentoCardW() int {
 	return w
 }
 
-// cardH returns the rendered height of one item's card (border included).
+// logoBand resolves a logo value into the card's art rows: a single-word
+// logo becomes a 5-row block-letter wordmark, anything else is raw ASCII
+// art clipped to bentoMaxLogo. Shared by cardHFor and renderCard so the
+// geometry and the pixels can never disagree.
+func logoBand(logo string) []string {
+	lines := logoLines(logo)
+	if len(lines) == 1 && IsWordmark(logo) {
+		return Wordmark(logo)
+	}
+	if len(lines) > bentoMaxLogo {
+		lines = lines[:bentoMaxLogo]
+	}
+	return lines
+}
+
+// cardHFor returns the rendered height of one item's card (border included).
 func cardHFor(it StoreItemView) int {
 	logo := 1
-	if n := len(logoLines(it.Logo)); n > 0 {
-		logo = min(n, bentoMaxLogo)
+	if n := len(logoBand(it.Logo)); n > 0 {
+		logo = n
 	}
 	return logo + bentoNameRows + 2 // +2: top/bottom border
 }
@@ -324,16 +339,13 @@ func (s *Storefront) renderCard(it StoreItemView, w, h int) string {
 	dim := lipgloss.NewStyle().Foreground(ColorDim)
 	var cb strings.Builder
 
-	// --- logo band: ASCII art, else the kind glyph ---
-	if lines := logoLines(it.Logo); len(lines) > 0 {
+	// --- logo band: wordmark or raw ASCII art (see logoBand) ---
+	if lines := logoBand(it.Logo); len(lines) > 0 {
 		art := lipgloss.NewStyle().Foreground(ColorCommand)
 		if it.Missing {
 			art = art.Foreground(ColorDimmer)
 		}
-		for i, ln := range lines {
-			if i >= bentoMaxLogo {
-				break
-			}
+		for _, ln := range lines {
 			cb.WriteString(art.Render(trunc(ln, inner)) + "\n")
 		}
 	} else {

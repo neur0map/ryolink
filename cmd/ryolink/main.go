@@ -220,9 +220,9 @@ func printUsage() {
 	fmt.Println("  ryolink --undeny <cidr>                  Lift a network ban")
 	fmt.Println("  ryolink --deny-list                      Show network bans")
 	fmt.Println("  ryolink --bartender-off / --bartender-on Toggle the bartender (live)")
-	fmt.Println("  ryolink --set-flag <game> <lvl> \"flag\"   Set a wargame flag")
+	fmt.Println("  ryolink --set-flag <game> <lvl> \"flag\"   Set a wargame flag (or edit wargame: in ryolink.yaml)")
 	fmt.Println("  ryolink --list-flags <game>              List wargame flags")
-	fmt.Println("  ryolink --feed-add <sub> [sub...]        Add subreddit(s) to the feed")
+	fmt.Println("  ryolink --feed-add <sub> [sub...]        Add subreddit(s) to the feed (or edit feed: in ryolink.yaml)")
 	fmt.Println("  ryolink --feed-remove <sub>              Remove a subreddit")
 	fmt.Println("  ryolink --feed-list                      List feed subreddits")
 	fmt.Println("  ryolink purge                            Purge weekly data (bans survive)")
@@ -546,6 +546,21 @@ func runServer() {
 	defer st.Close()
 	st.SeedRooms(cfg.RoomNames())
 
+	// config is the source of truth for the wargame board and the feed:
+	// edit ryolink.yaml, restart (or reload), done.
+	if len(cfg.Wargame.Games) > 0 {
+		if n, err := wargame.New(st.DB()).Sync(cfg.Wargame.Games); err != nil {
+			log.Printf("wargame: flag sync: %v", err)
+		} else if n > 0 {
+			log.Printf("wargame: synced %d flag changes from config", n)
+		}
+	}
+	if len(cfg.Feed.Subreddits) > 0 {
+		if err := st.SyncFeedSubreddits(cfg.Feed.Subreddits); err != nil {
+			log.Printf("feed: sync: %v", err)
+		}
+	}
+
 	h := hub.New()
 	go h.Run()
 
@@ -748,7 +763,7 @@ func runServer() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go startPurgeScheduler(st, h, pollStore, mysteryEngine)
+	go startPurgeScheduler(st, h, pollStore, mysteryEngine, *cfg)
 	if bt != nil {
 		go func() {
 			for {
@@ -765,6 +780,7 @@ func runServer() {
 	go watchPurgeFile(h)
 	go watchBartenderToggle(bt)
 	go watchDenyFile(g)
+	go watchConfigReload(configPath, st)
 
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
@@ -1052,18 +1068,26 @@ func initDMStore(st *store.Store) *dm.Store {
 	return ds
 }
 
-func startPurgeScheduler(st *store.Store, h *hub.Hub, ps *poll.Store, me *mystery.Engine) {
+// startPurgeScheduler runs the data wipe on the configured weekday+time
+// (UTC). A disabled schedule simply never fires; the room is then permanent
+// and the operator owns whatever that implies.
+func startPurgeScheduler(st *store.Store, h *hub.Hub, ps *poll.Store, me *mystery.Engine, cfg config.Config) {
+	if cfg.Purge.Disabled {
+		log.Println("purge: disabled by config — data is permanent")
+		return
+	}
+	day, hh, mm, err := cfg.PurgeTime()
+	if err != nil {
+		log.Printf("purge: bad schedule (%v) — falling back to sunday 23:59 UTC", err)
+		day, hh, mm = time.Sunday, 23, 59
+	}
 	for {
-		now := time.Now().UTC()
-		daysUntilSunday := (7 - int(now.Weekday())) % 7
-		if daysUntilSunday == 0 && (now.Hour() > 23 || (now.Hour() == 23 && now.Minute() >= 59)) {
-			daysUntilSunday = 7
-		}
-		next := time.Date(now.Year(), now.Month(), now.Day()+daysUntilSunday, 23, 59, 0, 0, time.UTC)
+		next := nextPurge(time.Now().UTC(), day, hh, mm)
 		timer := time.NewTimer(time.Until(next))
+		log.Printf("purge: next sweep %s", next.Format(time.RFC3339))
 		<-timer.C
 
-		log.Println("Weekly purge starting...")
+		log.Println("purge starting...")
 		h.BroadcastAll(session.Msg{
 			Type: session.MsgSystem,
 			Text: "The Ryolink has been swept clean.",
@@ -1073,7 +1097,48 @@ func startPurgeScheduler(st *store.Store, h *hub.Hub, ps *poll.Store, me *myster
 		if me != nil {
 			me.Reset()
 		}
-		log.Println("Weekly purge complete")
+		log.Println("purge complete")
+	}
+}
+
+// nextPurge returns the next occurrence of weekday day at hh:mm (UTC) after
+// now. If the slot is today but already past, it rolls to next week.
+func nextPurge(now time.Time, day time.Weekday, hh, mm int) time.Time {
+	days := (int(day) - int(now.Weekday()) + 7) % 7
+	next := time.Date(now.Year(), now.Month(), now.Day()+days, hh, mm, 0, 0, time.UTC)
+	if !next.After(now) {
+		next = next.AddDate(0, 0, 7)
+	}
+	return next
+}
+
+// watchConfigReload re-applies the config-owned tables (wargame flags, feed
+// subreddits) when the process gets SIGHUP — i.e. `ryolink reload`. The
+// listener itself is untouched; only what the YAML owns moves. Purge
+// schedule changes still need a restart, which the example config says.
+func watchConfigReload(configPath string, st *store.Store) {
+	sighup := make(chan os.Signal, 1)
+	signal.Notify(sighup, syscall.SIGHUP)
+	for range sighup {
+		cfg, err := config.Load(configPath)
+		if err != nil {
+			log.Printf("reload: %v — keeping current tables", err)
+			continue
+		}
+		if len(cfg.Wargame.Games) > 0 {
+			if n, err := wargame.New(st.DB()).Sync(cfg.Wargame.Games); err != nil {
+				log.Printf("reload: wargame sync: %v", err)
+			} else {
+				log.Printf("reload: wargame flags applied (%d changes)", n)
+			}
+		}
+		if len(cfg.Feed.Subreddits) > 0 {
+			if err := st.SyncFeedSubreddits(cfg.Feed.Subreddits); err != nil {
+				log.Printf("reload: feed sync: %v", err)
+			} else {
+				log.Printf("reload: feed subreddits applied")
+			}
+		}
 	}
 }
 

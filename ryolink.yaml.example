@@ -64,44 +64,34 @@ store:
   title: "Ryoku Store"
   public_url: ""              # e.g. https://dl.ryoku.dev — default: this host
   items:
+    # A one-word `logo:` renders as a block-letter wordmark on the card.
+    # Multi-line values are shown verbatim as ASCII art, if you prefer.
     - id: "ryoku-iso"
       name: "Ryoku Linux"
       kind: iso
       version: "0.59"
       desc: "The live image. Arch underneath, Hyprland + Quickshell on top."
       url: "https://github.com/ryoku-dev/ryoku-arch/releases/latest"   # mirror
-      logo: |2
-                          -`
-                         .o+`
-                        `ooo/
-                       `+oooo:
-                      `+oooooo:
-                      -+oooooo+:
+      logo: "ARCH"
     - id: "ryoku-cachyos-iso"
       name: "Ryoku CachyOS"
       kind: iso
       version: "0.59"
       desc: "Same desktop, CachyOS base: x86-64-v3 tuning + BORE scheduler."
       url: "https://github.com/ryoku-dev/ryoku-arch/releases/latest"
-      logo: |2
-         .-------------------------:
-        .+=========================.
-        :++===++==================-
-        :*++====+++++=============-
-        -*+++=====+***++==========:
-        =*++++========------------:
+      logo: "CACHY"
     - id: "recovery"
       name: "ryoku-recovery"
       kind: script
       desc: "The panic button: rebuilds the desktop from origin when an update bites."
       path: "store/ryoku-recovery.sh"
-      logo: "力"
+      logo: "RYOKU"
     - id: "shell-installer"
       name: "ryoku-shell-install"
       kind: script
       desc: "Convert an existing Arch box to the Ryoku desktop, one script."
       path: "store/ryoku-shell-install.sh"
-      logo: "力"
+      logo: "RYOKU"
 
 # Optional API keys. Environment variables (same names as the comments) win,
 # so secrets can live in EnvironmentFile= instead of here.
@@ -125,8 +115,76 @@ rooms:
   - name: "suggestions"
     type: chat
 
-  # Wargame CTF rooms (optional — for OverTheWire challenges)
-  # - name: "bandit"
-  #   type: wargame
+
+  # Wargame CTF rooms. The bandit board below is stocked with real
+  # OverTheWire level passwords — see the wargame: block.
+  - name: "bandit"
+    type: wargame
   # - name: "natas"
   #   type: wargame
+
+# ── wargame CTF boards ──────────────────────────────────────────────
+# The flag table lives here: add a level, fix a leaked flag, or remove a
+# level (set its flag to "") by editing this file. ryolink syncs it into the
+# database at startup and on `ryolink service reload`. A game listed here needs a
+# matching room of type wargame above.
+#
+# The values below are OverTheWire bandit's real level passwords — they let
+# players hop between levels on bandit.labs.overthewire.org, which is public
+# information. Swap in your own flags for a private board any time.
+wargame:
+  games:
+    bandit:
+      1: "6y2kwnwK6grgvwvpvLaa2T1cpFEKOhNR"
+      2: "PK8fYLZg2hnHSz83plBL1iEPKdD3QToB"
+      3: "7ZZ2LFrykP2zEyvBl4m3clcL7tGYJPME"
+      4: "xzTXq1rDJQVVAzdv5cHq1TQytTWufAMq"
+      5: "6C7h9GD8M6ai5nr7wo1RonrzFjj9yIrG"
+      6: "pXa26xhMWaC2SvDotA4r9EgZkulOeSBW"
+      7: "Bmnnvf82KzQlfxgAI2d1zYbr1u9pr3E3"
+      8: "VR1ljMayciFxbnUokuQmJFw6QC9VKtub"
+      9: "EjmOSvuAu7sGAHqHVcBDPirRe9T03kxl"
+      10: "B0s2khmbT9u0geKuOoVGW3JZKhndE3BG"
+      11: "pYfOY6HwUsDj5rL9UvyhU7MCmv8vN5Ro"
+      12: "GROozWPO8QyN0mGrjUkID0WCYkZiQxrN"
+      13: "qQYQiHOBPR8zR61qxYqX45quvihF2uzk"
+      14: "aaWecNkG4FhxJQxz07uiwzVP6bJiYS65"
+      15: "pbLYuZtTg4MgaqfJx8jbA9gKKGqM68A7"
+      16: "kS0Hf0u5HiXFwKMKFqXvPdOTNGGa0X8V"
+      17: "pWXMAZoxGC8JmDMfmT5MGEsobMM3vnj2"
+      18: "OQxXZjELndr90zuhOTDYBEomI0SZITXI"
+      19: "KpsOfPkcP7i1FlIExk2QEjyt6dw8dxZI"
+      20: "4pIjcunZ0fK2vmp3IwfG8Vf7VhxD6pOA"
+      21: "bW9kBv5WC3P4yoDyf12LSdGuNz5ka6hY"
+      22: "RYVux2rHEm9tiXHmLFzuR7Vhx6AZQMEz"
+      23: "gKXDTAXnIz3OBxiPjRZ2uqutUlPZrBsw"
+      24: "hVQMk3lJNsmQ7VF3ubyrNNBom7BOgVXv"
+      25: "SoHfqMOEqIX2IYKVciZxvgpR9a2Djx4P"
+      26: "jHdv2ELQhT22BkprMNDjybZDAkw1zeBJ"
+      27: "STJLJBRRphMxKB392CT4iOr5CbzPU9ER"
+      28: "y8Yd2ssKcpHpud7UvOSOxwamRMzIGIeQ"
+      29: "Em7eGtqaMySwNFjCpwzzHhLhospOcdt0"
+      30: "jq9Dfg2rXsfYsWMgFuKlXhphjdH7USgX"
+      31: "82NkymblpGBYmIXG6ZQ8YldBYstHpfUf"
+      32: "pWuj5jBQ6IgV0NXwiH6g1pXRF8S1YvbT"
+      33: "u4P2CyPOwPGLe94RdD9Uo2FxFwvnFswM"
+
+# ── data wipe schedule ──────────────────────────────────────────────
+# The sweep that keeps the room disposable. Weekday name + HH:MM, both UTC.
+# `disabled: true` makes chat permanent — then update the splash/help copy
+# yourself, because it still says "resets weekly".
+purge:
+  disabled: false
+  weekday: "sunday"
+  time: "23:59"
+
+# ── reddit feed ─────────────────────────────────────────────────────
+# The feed catalog. This list is authoritative: ryolink syncs it into the
+# database at startup and on `ryolink service reload`, so adding or deleting a line
+# here adds or removes a sub. `ryolink --feed-add/--feed-remove` still work
+# live between restarts. Needs REDDIT_CLIENT_ID/SECRET in api: above.
+feed:
+  subreddits:
+    - "archlinux"
+    - "unixporn"
+    - "freebsd"

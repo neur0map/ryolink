@@ -258,6 +258,65 @@ func (s *Store) Leaderboard(limit int) []LeaderboardEntry {
 	return entries
 }
 
+// DeleteFlag removes one level's flag from the board.
+func (s *Store) DeleteFlag(wargame string, level int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`DELETE FROM wargame_flags WHERE wargame = ? AND level = ?`, wargame, level)
+	return err
+}
+
+// Sync applies the config's flag table as the source of truth for every
+// game it mentions: listed levels are set, unlisted (or empty-flag) levels
+// are removed. Games absent from the map are left untouched, so an operator
+// can run bandit from YAML and natas from the CLI without them fighting.
+// Returns the number of rows changed.
+func (s *Store) Sync(games map[string]map[int]string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	changed := 0
+	for game, levels := range games {
+		want := map[int]string{}
+		for lvl, flag := range levels {
+			if flag != "" {
+				want[lvl] = flag
+			}
+		}
+		// current rows for this game
+		have := map[int]bool{}
+		rows, err := s.db.Query(`SELECT level FROM wargame_flags WHERE wargame = ?`, game)
+		if err != nil {
+			return changed, err
+		}
+		for rows.Next() {
+			var l int
+			if rows.Scan(&l) == nil {
+				have[l] = true
+			}
+		}
+		rows.Close()
+		for lvl, flag := range want {
+			if _, err := s.db.Exec(`
+				INSERT OR REPLACE INTO wargame_flags (wargame, level, flag)
+				VALUES (?, ?, ?)`, game, lvl, hashFlag(flag)); err != nil {
+				return changed, err
+			}
+			if !have[lvl] {
+				changed++
+			}
+		}
+		for lvl := range have {
+			if _, ok := want[lvl]; !ok {
+				if _, err := s.db.Exec(`DELETE FROM wargame_flags WHERE wargame = ? AND level = ?`, game, lvl); err != nil {
+					return changed, err
+				}
+				changed++
+			}
+		}
+	}
+	return changed, nil
+}
+
 func (s *Store) allWargames() []string {
 	rows, err := s.db.Query(`
 		SELECT DISTINCT wargame FROM wargame_flags
