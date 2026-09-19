@@ -215,6 +215,7 @@ func ffprobeDuration(data []byte) int {
 	}
 	tmp.Close()
 
+	// #nosec G204 — argv is fixed; the only variable is a CreateTemp path
 	out, err := exec.Command("ffprobe",
 		"-v", "quiet",
 		"-show_entries", "format=duration",

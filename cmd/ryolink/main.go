@@ -34,6 +34,7 @@ import (
 	"ryolink/internal/shop"
 	"ryolink/internal/store"
 	"ryolink/internal/sudoku"
+	"ryolink/internal/version"
 	"ryolink/internal/wargame"
 	"ryolink/internal/webstream"
 )
@@ -48,6 +49,16 @@ const purgeFile = ".purge"
 const denyFile = ".deny"
 
 func main() {
+	// `version` answers without touching any config — the release
+	// workflow reads its notes through the same parser the TUI uses.
+	if len(os.Args) > 1 && os.Args[1] == "version" {
+		if len(os.Args) > 2 && os.Args[2] == "--notes" {
+			fmt.Println(version.Notes())
+		} else {
+			fmt.Println(version.Version)
+		}
+		return
+	}
 	// `init` must run before config resolution (it creates the config).
 	if len(os.Args) > 1 && os.Args[1] == "init" {
 		runInit(os.Args[2:])
@@ -227,15 +238,6 @@ func printUsage() {
 	fmt.Println("  ryolink --feed-list                      List feed subreddits")
 	fmt.Println("  ryolink purge                            Purge weekly data (bans survive)")
 	fmt.Println("  ryolink --update                         Git dev deploy: pull, rebuild, restart")
-}
-
-func hasFlag(flag string) bool {
-	for _, arg := range os.Args[1:] {
-		if arg == flag {
-			return true
-		}
-	}
-	return false
 }
 
 func runMessage(text string) {
@@ -999,6 +1001,7 @@ func runCommand(dir string, env []string, name string, args ...string) error {
 	if err != nil {
 		return err
 	}
+	// #nosec G204 — fixed argv; repoDir is the executable's own directory
 	cmd := exec.Command(resolved, args...)
 	cmd.Dir = dir
 	cmd.Env = env
@@ -1012,6 +1015,7 @@ func commandOutput(dir string, env []string, name string, args ...string) (strin
 	if err != nil {
 		return "", err
 	}
+	// #nosec G204 — fixed argv; repoDir is the executable's own directory
 	cmd := exec.Command(resolved, args...)
 	cmd.Dir = dir
 	cmd.Env = env

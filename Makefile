@@ -1,4 +1,4 @@
-.PHONY: ryolink run test check clean
+.PHONY: ryolink run test check changelog changelog-check clean
 
 # Build the single static binary (assets embedded; runs anywhere)
 ryolink:
@@ -12,8 +12,16 @@ run: ryolink
 test:
 	go test -race ./internal/... ./ui/...
 
+# Keep the embedded changelog copy in sync with the root file
+changelog:
+	cp CHANGELOG.md internal/version/CHANGELOG.md
+
+changelog-check:
+	@cmp -s CHANGELOG.md internal/version/CHANGELOG.md || \
+		(echo "CHANGELOG.md drifted from the embedded copy — run: make changelog" && exit 1)
+
 # Run before push — lint + build + test (mirrors CI)
-check:
+check: changelog-check
 	gofmt -w .
 	go vet ./...
 	CGO_ENABLED=0 go build -trimpath -o ryolink ./cmd/ryolink

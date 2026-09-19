@@ -2,8 +2,9 @@
 
 "ryolink" and "ryoku.dev" are trademarks of neur0map.
 
-You may freely fork, modify, and deploy this software under the MIT
-license. However, you may NOT:
+You may freely fork, modify, and deploy this software under the
+GNU General Public License v3 (see [LICENSE](LICENSE)). However, you
+may NOT:
 
 - Use the names "ryolink" or "ryoku.dev" for your deployment
 - Use ryoku.dev branding, logos, or visual identity
@@ -14,4 +15,5 @@ ryolink.yaml configuration enforces this by design — the software
 will not start without your own configuration.
 
 This is a trademark restriction only. It does not limit your rights
-under the MIT license to use, modify, or distribute the code.
+under the GPL to use, modify, and distribute the code — copyleft
+terms still apply.

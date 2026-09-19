@@ -223,6 +223,7 @@ func detectOwnerFingerprint() string {
 		cands, _ = filepath.Glob(filepath.Join(home, ".ssh", "*.pub"))
 	}
 	for _, c := range cands {
+		// #nosec G204 — c is a glob result from the operator's own ~/.ssh
 		out, err := exec.Command("ssh-keygen", "-lf", c).Output()
 		if err == nil {
 			parts := strings.Fields(strings.TrimSpace(string(out)))
@@ -315,6 +316,7 @@ func mustRoot() {
 }
 
 func run(name string, args ...string) {
+	// #nosec G204 — every call site passes literal argv (systemctl, journalctl).
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -398,18 +400,28 @@ func installService(args []string) {
 	// It cannot live inside the data dir — that is 0700 to the service user,
 	// so root could not have written it there in the first place.
 	sysDir := "/etc/ryolink"
-	if err := os.MkdirAll(sysDir, 0755); err != nil {
+	if err := os.MkdirAll(sysDir, 0750); err != nil {
 		fmt.Fprintf(os.Stderr, "config dir: %v\n", err)
 		os.Exit(1)
 	}
+	// group = the service user's group, so it can traverse and read the
+	// staged config without opening /etc to the world
+	if gid := primaryGroup(uid); gid >= 0 {
+		os.Chown(sysDir, 0, gid)
+	}
 	sysCfg := filepath.Join(sysDir, "ryolink.yaml")
 	b, _ := os.ReadFile(cfgPath)
-	if err := os.WriteFile(sysCfg, b, 0644); err != nil {
+	if err := os.WriteFile(sysCfg, b, 0640); err != nil { // #nosec G306 — root:servicegroup, config is not secret material (secrets live in EnvironmentFile=)
 		fmt.Fprintf(os.Stderr, "stage config: %v\n", err)
 		os.Exit(1)
 	}
+	if gid := primaryGroup(uid); gid >= 0 {
+		os.Chown(sysCfg, 0, gid) // group-readable by the service user
+	}
 
 	unitPath := "/etc/systemd/system/ryolink.service"
+	// #nosec G306 — systemd units are world-readable by convention; the
+	// unit carries no secrets (EnvironmentFile= does, and that is 0600)
 	if err := os.WriteFile(unitPath, []byte(serviceUnit(user, binary, cfg.Server.DataDir, sysCfg)), 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "write unit: %v\n", err)
 		os.Exit(1)
@@ -468,10 +480,25 @@ func findConfigSystemWide() string {
 	return findConfig()
 }
 
+// primaryGroup resolves a uid's primary gid, or -1.
+func primaryGroup(uid int) int {
+	u, err := user.LookupId(strconv.Itoa(uid))
+	if err != nil {
+		return -1
+	}
+	gid, err := strconv.Atoi(u.Gid)
+	if err != nil {
+		return -1
+	}
+	return gid
+}
+
 func chown(path string, uid int) {
 	if uid < 0 {
 		return
 	}
+	// #nosec G204 — uid is a resolved numeric id; path comes from the
+	// operator's own validated config, and this runs as root by design.
 	exec.Command("chown", "-R", fmt.Sprintf("%d:", uid), path).Run()
 }
 

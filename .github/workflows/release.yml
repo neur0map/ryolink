@@ -1,0 +1,113 @@
+name: Release
+
+# Every push to main that passes the gate ships a release. The version and
+# the release notes are the same bytes the TUI renders (internal/version
+# embeds CHANGELOG.md), so the tag page and the in-app changelog can never
+# disagree. If a push forgot to bump the version, the workflow bumps the
+# patch itself and writes the changelog section from the commit log.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Version + release
+    runs-on: ubuntu-latest
+    # never re-run on our own bump commit
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Wait for the CI gate on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # ship nothing the gate didn't bless: lint, tests, govulncheck,
+          # gosec and the secret scan all live in ci.yml
+          sha=${{ github.sha }}
+          for i in $(seq 1 80); do
+            json=$(gh api "repos/${{ github.repository }}/commits/$sha/check-runs" \
+              --jq '[.check_runs[] | select(.name | test("release") | not)]' 2>/dev/null || echo '[]')
+            n=$(echo "$json" | jq 'length')
+            if [ "$n" -eq 0 ]; then sleep 20; continue; fi
+            pending=$(echo "$json" | jq '[.[] | select(.status != "completed")] | length')
+            if [ "$pending" -gt 0 ]; then sleep 20; continue; fi
+            bad=$(echo "$json" | jq '[.[] | select(.conclusion != "success" and .conclusion != "skipped")] | length')
+            if [ "$bad" -gt 0 ]; then
+              echo "CI gate not green ($(echo "$json" | jq -c '[.[].conclusion]')) — refusing to release"
+              exit 1
+            fi
+            echo "gate green on $sha"
+            exit 0
+          done
+          echo "CI gate did not report within the window" && exit 1
+
+      - name: Resolve the version (auto-bump if the push forgot)
+        id: meta
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          declared=$(go run ./cmd/ryolink version)
+          if git rev-parse "v$declared" >/dev/null 2>&1; then
+            # tag exists -> this push didn't bump. derive next patch from
+            # the newest tag and write the changelog section from commits.
+            last=$(git tag --sort=-v:refname | head -1 | sed 's/^v//')
+            IFS=. read -r maj min pat <<< "$last"
+            v="$maj.$min.$((pat + 1))"
+            echo "auto-bump: v$declared is tagged already -> releasing v$v"
+            {
+              echo ""
+              echo "## v$v"
+              echo ""
+              git log "v$last..HEAD" --no-merges --format='- %s' \
+                | grep -v '^\- release:' || echo "- maintenance release"
+              echo ""
+            } > /tmp/section.md
+            # insert the new section directly under the "# Changelog" header
+            head -1 CHANGELOG.md > /tmp/new.md
+            cat /tmp/section.md >> /tmp/new.md
+            tail -n +2 CHANGELOG.md >> /tmp/new.md
+            cp /tmp/new.md CHANGELOG.md
+            cp CHANGELOG.md internal/version/CHANGELOG.md
+            sed -i "s/^const Version = .*/const Version = \"$v\"/" internal/version/version.go
+            git add CHANGELOG.md internal/version/CHANGELOG.md internal/version/version.go
+            git commit -m "release: v$v [skip ci]"
+            git push origin HEAD:main
+          else
+            v=$declared
+            # the author's own bump must keep the two copies in sync
+            cmp -s CHANGELOG.md internal/version/CHANGELOG.md || {
+              echo "CHANGELOG.md and the embedded copy differ — run: make changelog"
+              exit 1
+            }
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Build the release binary
+        run: CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o ryolink ./cmd/ryolink
+
+      - name: Notes from the binary (same parser the TUI uses)
+        run: ./ryolink version --notes > notes.md && head -5 notes.md
+
+      - name: Tag and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.meta.outputs.version }}
+        run: |
+          git tag "v$V"
+          git push origin "v$V"
+          gh release create "v$V" \
+            --title "ryolink v$V" \
+            --notes-file notes.md \
+            ./ryolink#ryolink-linux-amd64
