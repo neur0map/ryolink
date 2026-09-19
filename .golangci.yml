@@ -11,12 +11,15 @@ linters:
     - staticcheck
     - unused
     - ineffassign
+  exclusions:
+    generated: lax
+    paths:
+      - vendor
+    rules:
+      - linters:
+          - staticcheck
+        text: "^QF"
 
 issues:
-  exclude-dirs:
-    - vendor
-  exclude-rules:
-    - linters: [staticcheck]
-      text: "^QF"
   max-issues-per-linter: 0
   max-same-issues: 0
