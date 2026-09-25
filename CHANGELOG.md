@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.9.3
+
+- docs: UI style guide and contributing map
+- feat: storefront shelf filter and product detail card
+
+
 ## v0.9.2
 
 - test: notes leak check must compare full header lines
