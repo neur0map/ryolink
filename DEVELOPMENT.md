@@ -43,6 +43,10 @@ bartender memory (each marked `survives purges` in `store.go`).
 
 ## UI: Bubble Tea over SSH is not Bubble Tea on your laptop
 
+Hazards first, craft second: [docs/UI.md](docs/UI.md) is the style guide —
+ASCII wordmarks and icons, the color ladder, box geometry, hit-testing,
+and how to prove a frame.
+
 - **Mouse is opt-in and off by default** (`ctrl+m`). When on, wish emits
   `MouseModeCellMotion`. Clicks carry absolute screen coordinates, so every
   clickable surface needs a `SetOrigin` from the parent to map screen→item.

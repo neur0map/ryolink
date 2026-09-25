@@ -56,9 +56,14 @@ ui/
   gallery.go       Sticky note board
   sudoku_view.go   Multiplayer sudoku view
   overlay.go       Modal overlay compositor
-  styles.go        Cantina color palette
+  styles.go        Ryoku (Tokyo Night) color palette
   splash.go        Welcome screen
+  wordmark.go      Block-letter ASCII wordmarks for store logos
+  gradient.go      HCL brand gradients
 ```
+
+Making it look like this: [UI.md](UI.md) — ASCII titles, icons, color, and
+the TUI geometry/hit-testing rules.
 
 ## Architecture
 
