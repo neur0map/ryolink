@@ -525,7 +525,7 @@ func (s *Server) teaHandler(sshSess ssh.Session) (tea.Model, []tea.ProgramOption
 			for _, it := range raw {
 				out = append(out, ui.StoreItemView{
 					ID: it.ID, Name: it.Name, Kind: it.Kind,
-					Description: it.Description, Version: it.Version,
+					Description: it.Description, Details: it.Details, Version: it.Version,
 					URL: it.URL, Size: it.Size, SHA256: it.SHA256,
 					Downloads: it.Downloads, Missing: it.Missing, Logo: it.Logo,
 				})

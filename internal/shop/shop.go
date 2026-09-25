@@ -31,6 +31,7 @@ type Item struct {
 	Name        string `json:"name"`
 	Kind        string `json:"kind"` // iso | script | file
 	Description string `json:"desc"`
+	Details     string `json:"details,omitempty"`
 	Version     string `json:"version"`
 	Logo        string `json:"logo,omitempty"`
 	URL         string `json:"url,omitempty"` // external canonical URL, if linked
@@ -81,7 +82,7 @@ func (s *Shop) reindex() {
 	for _, it := range s.cfg.Items {
 		e := Item{
 			ID: it.ID, Name: it.Name, Kind: normalizeKind(it.Kind),
-			Description: it.Description, Version: it.Version, URL: it.URL,
+			Description: it.Description, Details: it.Details, Version: it.Version, URL: it.URL,
 			Logo: strings.Join(it.LogoLines(), "\n"),
 			Size: -1,
 		}

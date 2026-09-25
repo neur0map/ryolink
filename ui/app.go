@@ -98,6 +98,7 @@ type App struct {
 	changelogModal  ChangelogModal
 	gifModal        GifModal
 	paletteModal    PaletteModal
+	storeDetail     *StoreDetailModal
 
 	// Polls
 	pollStore *poll.Store
@@ -301,6 +302,27 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The storefront asked to put a download URL on the user's clipboard
 		// (OSC 52 rides the SSH channel; no client config needed).
 		return a, tea.SetClipboard(msg.URL)
+	case StoreOpenDetailMsg:
+		// ENTER on the shelf — open the full product card.
+		if a.storefront != nil {
+			items := a.storefront.VisibleItems()
+			idx := a.storefront.Cursor()
+			if len(items) > 0 {
+				m := NewStoreDetailModal(items, idx)
+				a.storeDetail = &m
+				a.modal = ModalStoreDetail
+			}
+		}
+		return a, nil
+	case StoreFilterMsg:
+		// A '/' search committed inside the product card: filter the grid
+		// and drop back to the shelf to see the results.
+		if a.storefront != nil {
+			a.storefront.SetFilter(msg.Query)
+		}
+		a.storeDetail = nil
+		a.modal = ModalNone
+		return a, nil
 	case feedCommentsMsg:
 		a.feed.SetComments(msg.comments, msg.post)
 		return a, nil
@@ -384,6 +406,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 
 	case CloseModalMsg:
+		a.closeStoreDetail()
 		a.modal = ModalNone
 		return a, nil
 
@@ -810,6 +833,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			a.storefront.SetItems(items)
 		}
+		// The esc decision must happen BEFORE the grid consumes it (the
+		// search bar clears itself on esc), so sample the state first.
+		wasDirty := a.storefront.Filter() != "" || a.storefront.Searching()
 		sf := a.storefront
 		var cmd tea.Cmd
 		sf, cmd = sf.Update(msg)
@@ -820,6 +846,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "ctrl+c":
 				return a, tea.Quit
 			case "esc":
+				// While the shelf was filtered or being searched, esc
+				// backed out of that (the grid already handled it); only a
+				// clean grid leaves the store.
+				if wasDirty {
+					return a, cmd
+				}
 				if bar := a.roomByType("chat"); bar != "" {
 					a.switchRoom(bar)
 				} else {
@@ -829,13 +861,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case tea.MouseWheelMsg:
 			return a, cmd
-		}
-		// typing "/" jumps to the lounge chat input
-		if keyMsg, ok := msg.(tea.KeyPressMsg); ok && keyMsg.String() == "/" {
-			if bar := a.roomByType("chat"); bar != "" {
-				a.switchRoom(bar)
-			}
-			return a, nil
 		}
 		return a, cmd
 	}
@@ -1094,7 +1119,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			names = append(names, s.Nickname)
 		}
 	}
-	if a.session.Room == a.firstRoom {
+	// Mika works the bar, not the storefront.
+	if bar := a.roomByType("chat"); bar != "" && a.session.Room == bar {
 		names = append(names, "Mika")
 	}
 	a.chat.UpdateMentionPopup(names)
@@ -1102,10 +1128,26 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, cmd
 }
 
+// closeStoreDetail transfers the product card's position back to the grid
+// cursor, so ←→ browsing inside the modal and then leaving it lands where
+// the user was looking.
+func (a *App) closeStoreDetail() {
+	if a.modal == ModalStoreDetail && a.storeDetail != nil && a.storefront != nil {
+		a.storefront.SetCursor(a.storeDetail.idx)
+	}
+	a.storeDetail = nil
+}
+
 func (a App) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		if msg.String() == "esc" {
+			// The product card's '/' search swallows esc to back out of
+			// typing first; everything else closes the modal.
+			if a.modal == ModalStoreDetail && a.storeDetail != nil && a.storeDetail.search {
+				break
+			}
+			a.closeStoreDetail()
 			a.modal = ModalNone
 			return a, nil
 		}
@@ -1176,6 +1218,22 @@ func (a App) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.wargameRulesModal, cmd = a.wargameRulesModal.Update(msg)
 		return a, cmd
+	case ModalStoreDetail:
+		if a.storeDetail != nil {
+			// keep the live catalog flowing: refresh the grid (which owns
+			// the filter) and hand the modal the same list the shelf
+			// navigates, so ←→ and the close-time cursor agree
+			if a.shop != nil && a.storefront != nil {
+				_, items := a.shop()
+				a.storefront.SetItems(items)
+				a.storeDetail.SetItems(a.storefront.VisibleItems())
+			}
+			var cmd tea.Cmd
+			*a.storeDetail, cmd = a.storeDetail.Update(msg)
+			return a, cmd
+		}
+		a.modal = ModalNone
+		return a, nil
 	case ModalPalette:
 		var cmd tea.Cmd
 		a.paletteModal, cmd = a.paletteModal.Update(msg)
@@ -1755,7 +1813,8 @@ func (a *App) refreshCaches() {
 		}
 		names = append(names, name)
 	}
-	if a.session.Room == a.firstRoom {
+	// …and the online list, likewise
+	if bar := a.roomByType("chat"); bar != "" && a.session.Room == bar {
 		names = append(names, "◆ Mika")
 	}
 	sort.Strings(names)
@@ -2298,6 +2357,10 @@ func (a App) View() tea.View {
 			modalBox = a.wargameRulesModal.View(a.width, a.height)
 		case ModalPalette:
 			modalBox = a.paletteModal.View(a.width, a.height)
+		case ModalStoreDetail:
+			if a.storeDetail != nil {
+				modalBox = a.storeDetail.View(a.width, a.height)
+			}
 		}
 		base = Overlay(base, modalBox, a.width, a.height)
 	}

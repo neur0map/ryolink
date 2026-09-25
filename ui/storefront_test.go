@@ -35,7 +35,7 @@ func TestStorefrontClicksLandOnOwnCard(t *testing.T) {
 		relY := 1 // inside the border
 		baseY := s.rowOrigin
 		for r := s.top / perRow; r < row; r++ {
-			baseY += s.rowHeight(r, perRow)
+			baseY += s.rowHeight(r, perRow, s.visible())
 		}
 		x := col*(cardW+2) + cardW/2
 		if got := s.itemAtClick(x, baseY+relY); got != idx {

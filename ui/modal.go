@@ -33,6 +33,7 @@ const (
 	ModalLeaderboard
 	ModalWargameRules
 	ModalPalette
+	ModalStoreDetail
 )
 
 // CloseModalMsg signals modal should close.
@@ -129,6 +130,21 @@ func (h HelpModal) View(width, height int) string {
 		{"click + drag", "move your notes"},
 	}
 	for _, k := range gkeys {
+		fmt.Fprintf(&b, "  %s  %s\n", cmd.Width(18).Render(k.k), desc.Render(k.d))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(cat.Render("STORE KEYS"))
+	b.WriteString("\n")
+	skeys := []struct{ k, d string }{
+		{"j/k or arrows", "browse the shelf"},
+		{"ENTER", "open the product card"},
+		{"arrows in card", "browse all products"},
+		{"pgup/pgdn/space", "page a long card"},
+		{"C / U / X", "copy link / curl / sha256"},
+		{"/", "filter the shelves"},
+	}
+	for _, k := range skeys {
 		fmt.Fprintf(&b, "  %s  %s\n", cmd.Width(18).Render(k.k), desc.Render(k.d))
 	}
 

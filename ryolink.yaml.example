@@ -66,11 +66,25 @@ store:
   items:
     # A one-word `logo:` renders as a block-letter wordmark on the card.
     # Multi-line values are shown verbatim as ASCII art, if you prefer.
+    # `details:` is the long form — it shows only in the product card
+    # (ENTER on a card), where the text wraps and scrolls. Keep `desc:` to
+    # one line: it's the most the bento grid has room for.
     - id: "ryoku-iso"
       name: "Ryoku Linux"
       kind: iso
       version: "0.59"
       desc: "The live image. Arch underneath, Hyprland + Quickshell on top."
+      details: |
+        The Ryoku desktop in one ISO: Arch underneath, Hyprland and the
+        Quickshell shell on top, with the Ryostore, the Hub control center,
+        and ryogami wallpaper daemon already wired.
+
+        Boot it live from a USB stick to look around, or run the installer
+        straight from the session. Everything the desktop touches lives in
+        ~/.config — take it with you.
+
+        Verify the download: the storefront card shows the sha256 once the
+        operator has staged the file, and `x` copies it.
       url: "https://github.com/ryoku-dev/ryoku-arch/releases/latest"   # mirror
       logo: "ARCH"
     - id: "ryoku-cachyos-iso"

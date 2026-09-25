@@ -127,6 +127,7 @@ type StoreItem struct {
 	Name        string `yaml:"name"`
 	Kind        string `yaml:"kind"` // iso | script | file
 	Description string `yaml:"desc"`
+	Details     string `yaml:"details"` // long form, shown in the item modal
 	Version     string `yaml:"version"`
 	Path        string `yaml:"path"` // local file (relative paths resolve against data_dir)
 	URL         string `yaml:"url"`  // external canonical URL (wins over serving)
